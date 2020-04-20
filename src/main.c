@@ -13,7 +13,7 @@
 #include <cJSON_os.h>
 #include <cJSON.h>
 
-#define SERVER_IPV4 				"3.124.128.69"
+#define SERVER_HOSTNAME 			"nat-test.thingy.rocks"
 #define UDP_PORT					3050
 #define TCP_PORT 					3051
 #define SEND_BUF_SIZE	 			512
@@ -255,7 +255,10 @@ int poll_and_read(int client_fd)
 static int setup_connection(int * client_fd)
 {
 	int err;
-	static struct sockaddr_in server = { 0 };
+	struct addrinfo *res;
+	struct addrinfo hints = {
+		.ai_family = AF_INET,
+	};
 
 	err = lte_connection_check();
 	if (err < 0)
@@ -280,8 +283,7 @@ static int setup_connection(int * client_fd)
 			return -1;
 		}
 
-		server.sin_family = AF_INET;
-		server.sin_port = htons(UDP_PORT);
+		hints.ai_socktype = SOCK_DGRAM;
 	}
 	else if (current_protocol == TIMEOUT_TCP)
 	{
@@ -290,22 +292,31 @@ static int setup_connection(int * client_fd)
 			printk("socket() failed, errno: %d\n", errno);
 			return -1;
 		}
-		server.sin_family = AF_INET;
-		server.sin_port = htons(TCP_PORT);
+
+		hints.ai_socktype = SOCK_STREAM;
 	}
 	else 
 	{
 		return -1;
 	}
-	
-	err = inet_pton(AF_INET, SERVER_IPV4, &server.sin_addr);
-	if (err != 1) {
-		printk("inet_pton failed, errno: %d\n", errno);
+
+	err = getaddrinfo(SERVER_HOSTNAME, NULL, &hints, &res);
+	if (err) {
+		printk("getaddrinfo() failed, err %d\n", errno);
 		return -1;
 	}
 
-	err = connect(*client_fd, (struct sockaddr *)&server,
-		      sizeof(struct sockaddr_in));
+	if (current_protocol == TIMEOUT_UDP)
+	{
+		((struct sockaddr_in *)res->ai_addr)->sin_port = htons(UDP_PORT);
+	}
+	else if (current_protocol == TIMEOUT_TCP)
+	{
+		((struct sockaddr_in *)res->ai_addr)->sin_port = htons(TCP_PORT);
+	}
+
+
+	err = connect(*client_fd, res->ai_addr, sizeof(struct sockaddr_in));
 	if (err) 
 	{
 		printk("connect failed, errno: %d\n\r", errno);
