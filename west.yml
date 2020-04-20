@@ -1,0 +1,12 @@
+manifest:
+  remotes:
+    - name: nordic
+      url-base: https://github.com/NordicPlayground
+  projects:
+    - name: fw-nrfconnect-nrf
+      path: nrf
+      remote: nordic
+      revision: a8a46cab54c402db76ba9c309636cfa52785b5ad
+      import: true
+  self:
+    path: firmware
