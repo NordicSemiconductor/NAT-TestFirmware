@@ -101,6 +101,7 @@ static int createSendBuffer(struct modem_param_info * modem_params, char * buffe
 {
 	int ret = 0;
 	cJSON *root_obj = cJSON_CreateObject();
+	const char delim[2] = " ";
 
 
 	if (root_obj == NULL)
@@ -110,7 +111,7 @@ static int createSendBuffer(struct modem_param_info * modem_params, char * buffe
 	}
 
 	ret += json_add_str(root_obj, "op", modem_params->network.current_operator.value_string);
-	ret += json_add_str(root_obj, "ip", modem_params->network.ip_address.value_string);
+	ret += json_add_str(root_obj, "ip", strtok(modem_params->network.ip_address.value_string, delim));
 	ret += json_add_number(root_obj, "cell_id", modem_params->network.cellid_dec);
 	ret += json_add_number(root_obj, "ue_mode", modem_params->network.ue_mode.value);
 	ret += json_add_str(root_obj, "iccid", modem_params->sim.iccid.value_string);
