@@ -19,8 +19,8 @@
 #define SEND_BUF_SIZE	 			512
 #define RECV_BUF_SIZE	 			256
 #define UDP_INITIAL_TIMEOUT			1
-#define TCP_INITIAL_TIMEOUT			300
-#define TIMEOUT_INCREMENT(COUNTER)	(COUNTER*COUNTER/4)
+#define TCP_TIMEOUT_OFFSET			35
+#define TIMEOUT_INCREMENT(COUNTER)	(((COUNTER)*(COUNTER))/4)
 #define TIMEOUT_TOL					5
 #define INV_FORMAT_MSG				"Error occured.\nConnection closed.\n"
 #define S_TO_MS(S)					((S)*1000)
@@ -48,7 +48,7 @@ static int getTimeout()
 	}
 	else if (current_protocol == TIMEOUT_TCP)
 	{
-		return TCP_INITIAL_TIMEOUT + TIMEOUT_INCREMENT(packet_counter);
+		return TIMEOUT_INCREMENT(packet_counter * TCP_TIMEOUT_OFFSET);
 	}
 	return -1;
 }
