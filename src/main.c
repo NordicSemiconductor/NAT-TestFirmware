@@ -101,8 +101,10 @@ static int createSendBuffer(struct modem_param_info * modem_params, char * buffe
 {
 	int ret = 0;
 	cJSON *root_obj = cJSON_CreateObject();
-	const char delim[2] = " ";
-
+	cJSON *ip_obj;
+	const char *delim = " ";
+	const char *ip_strings[10];
+	int ip_count = 0;
 
 	if (root_obj == NULL)
 	{
@@ -110,8 +112,23 @@ static int createSendBuffer(struct modem_param_info * modem_params, char * buffe
 		return -ENOMEM;
 	}
 
+	char *token = strtok(modem_params->network.ip_address.value_string, delim);
+	while(token != NULL && ip_count < ARRAY_SIZE(ip_strings))
+	{
+		ip_strings[ip_count] = token;
+		token = strtok(NULL, delim);
+		ip_count++;
+	}
+
+	ip_obj = cJSON_CreateStringArray(ip_strings, ip_count);
+	if (ip_obj == NULL)
+	{
+		cJSON_Delete(ip_obj);
+		return -ENOMEM;
+	}
+	
+	ret += json_add_obj(root_obj, "ip", ip_obj);
 	ret += json_add_str(root_obj, "op", modem_params->network.current_operator.value_string);
-	ret += json_add_str(root_obj, "ip", strtok(modem_params->network.ip_address.value_string, delim));
 	ret += json_add_number(root_obj, "cell_id", modem_params->network.cellid_dec);
 	ret += json_add_number(root_obj, "ue_mode", modem_params->network.ue_mode.value);
 	ret += json_add_str(root_obj, "iccid", modem_params->sim.iccid.value_string);
@@ -123,19 +140,19 @@ static int createSendBuffer(struct modem_param_info * modem_params, char * buffe
 	}
 
 	char *root_obj_string = cJSON_Print(root_obj);
-	if (root_obj_string == NULL)
+	if (root_obj_string == NULL || ip_obj == NULL)
 	{
 		printk("JSON root object empty\n");
 		goto exit;
 	}
 
 	ret = strlen(root_obj_string);
-	memcpy(buffer, root_obj_string, ret);	
+	memcpy(buffer, root_obj_string, ret);
 	cJSON_FreeString(root_obj_string);
 
 exit:
 	cJSON_Delete(root_obj);
-
+	
 	return ret;
 }
 
@@ -365,7 +382,7 @@ void main(void)
 
 	while(current_protocol < NONE)
 	{
-		send_data(client_fd);
+		err = send_data(client_fd);
 		if (err < 0)
 		{
 			goto reconnect;
