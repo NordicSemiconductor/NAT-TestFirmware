@@ -13,25 +13,29 @@
 #include <cJSON_os.h>
 #include <cJSON.h>
 
-#define SERVER_HOSTNAME 			"nat-test.thingy.rocks"
-#define UDP_PORT					3050
-#define TCP_PORT 					3051
-#define SEND_BUF_SIZE	 			512
-#define RECV_BUF_SIZE	 			256
-#define UDP_INITIAL_TIMEOUT			1
-#define TCP_TIMEOUT_OFFSET			35
-#define TIMEOUT_INCREMENT(COUNTER)	(((COUNTER)*(COUNTER))/4)
-#define TIMEOUT_TOL					5
-#define INV_FORMAT_MSG				"Error occured.\nConnection closed.\n"
-#define S_TO_MS(S)					((S)*1000)
+#define SERVER_HOSTNAME "nat-test.thingy.rocks"
+#define UDP_PORT 3050
+#define TCP_PORT 3051
+#define SEND_BUF_SIZE 512
+#define RECV_BUF_SIZE 256
+#define UDP_INITIAL_TIMEOUT 1
+#define TCP_TIMEOUT_OFFSET 35
+#define TIMEOUT_INCREMENT(COUNTER) (((COUNTER) * (COUNTER)) / 4)
+#define POLL_TIMEOUT (S_TO_MS(60))
+#define TIMEOUT_TOL 5
+#define INV_FORMAT_MSG "Error occured.\nConnection closed.\n"
+#define S_TO_MS(S) ((S)*1000)
+#define MS_TO_S(MS) ((MS) / 1030)
 
-enum protocol{
+enum protocol
+{
 	TIMEOUT_UDP,
 	TIMEOUT_TCP,
 	NONE
 };
 
-struct timeout_struct {
+struct timeout_struct
+{
 	int udp_timeout;
 	int tcp_timeout;
 } max_timeout;
@@ -39,9 +43,9 @@ struct timeout_struct {
 static enum protocol current_protocol = TIMEOUT_UDP;
 static int packet_counter = 1;
 
-static int getTimeout() 
+static int get_timeout()
 {
-		
+
 	if (current_protocol == TIMEOUT_UDP)
 	{
 		return UDP_INITIAL_TIMEOUT + TIMEOUT_INCREMENT(packet_counter);
@@ -53,16 +57,16 @@ static int getTimeout()
 	return -1;
 }
 
-static char* getProtocolName(enum protocol proto)
+static char *get_protocol_name(enum protocol protocol)
 {
-	switch(proto) 
+	switch (protocol)
 	{
-		case TIMEOUT_UDP:
-			return "UDP";
-		case TIMEOUT_TCP:
-			return "TCP";
-		default:
-			return "NONE";
+	case TIMEOUT_UDP:
+		return "UDP";
+	case TIMEOUT_TCP:
+		return "TCP";
+	default:
+		return "NONE";
 	}
 }
 
@@ -78,7 +82,8 @@ static int json_add_str(cJSON *parent, const char *str, const char *item)
 	cJSON *json_str;
 
 	json_str = cJSON_CreateString(item);
-	if (json_str == NULL) {
+	if (json_str == NULL)
+	{
 		return -ENOMEM;
 	}
 
@@ -90,14 +95,15 @@ static int json_add_number(cJSON *parent, const char *str, double item)
 	cJSON *json_num;
 
 	json_num = cJSON_CreateNumber(item);
-	if (json_num == NULL) {
+	if (json_num == NULL)
+	{
 		return -ENOMEM;
 	}
 
 	return json_add_obj(parent, str, json_num);
 }
 
-static int createSendBuffer(struct modem_param_info * modem_params, char * buffer)
+static int create_send_buffer(struct modem_param_info *modem_params, char *buffer)
 {
 	int ret = 0;
 	cJSON *root_obj = cJSON_CreateObject();
@@ -113,7 +119,7 @@ static int createSendBuffer(struct modem_param_info * modem_params, char * buffe
 	}
 
 	char *token = strtok(modem_params->network.ip_address.value_string, delim);
-	while(token != NULL && ip_count < ARRAY_SIZE(ip_strings))
+	while (token != NULL && ip_count < ARRAY_SIZE(ip_strings))
 	{
 		ip_strings[ip_count] = token;
 		token = strtok(NULL, delim);
@@ -126,15 +132,15 @@ static int createSendBuffer(struct modem_param_info * modem_params, char * buffe
 		cJSON_Delete(ip_obj);
 		return -ENOMEM;
 	}
-	
+
 	ret += json_add_obj(root_obj, "ip", ip_obj);
 	ret += json_add_str(root_obj, "op", modem_params->network.current_operator.value_string);
 	ret += json_add_number(root_obj, "cell_id", modem_params->network.cellid_dec);
 	ret += json_add_number(root_obj, "ue_mode", modem_params->network.ue_mode.value);
 	ret += json_add_str(root_obj, "iccid", modem_params->sim.iccid.value_string);
-	ret += json_add_number(root_obj, "interval", getTimeout());
+	ret += json_add_number(root_obj, "interval", get_timeout());
 
-	if (ret) 
+	if (ret)
 	{
 		goto exit;
 	}
@@ -152,7 +158,7 @@ static int createSendBuffer(struct modem_param_info * modem_params, char * buffe
 
 exit:
 	cJSON_Delete(root_obj);
-	
+
 	return ret;
 }
 
@@ -171,11 +177,11 @@ static int lte_connection_check(void)
 
 	switch (nw_reg_status)
 	{
-		case LTE_LC_NW_REG_REGISTERED_HOME:
-		case LTE_LC_NW_REG_REGISTERED_ROAMING:
-			return 0;
-		default:
-			return -1;
+	case LTE_LC_NW_REG_REGISTERED_HOME:
+	case LTE_LC_NW_REG_REGISTERED_ROAMING:
+		return 0;
+	default:
+		return -1;
 	}
 }
 
@@ -187,7 +193,7 @@ int send_data(int client_fd)
 	struct modem_param_info modem_params = {0};
 
 	err = modem_info_params_init(&modem_params);
-	if (err) 
+	if (err)
 	{
 		printk("Modem info params could not be initialised: %d\n", err);
 		return -1;
@@ -200,7 +206,7 @@ int send_data(int client_fd)
 		return -1;
 	}
 
-	send_len = createSendBuffer(&modem_params, send_buf);
+	send_len = create_send_buffer(&modem_params, send_buf);
 	if (send_len < 0)
 	{
 		printk("Error creating json object: %d\n", send_len);
@@ -208,13 +214,13 @@ int send_data(int client_fd)
 	}
 
 	err = send(client_fd, send_buf, send_len + 1, 0);
-	if (err < 0) 
+	if (err < 0)
 	{
 		printk("Failed to send data, errno: %d\n", errno);
 
 		return 0;
 	}
-	printk("Packet sent: %s\n", send_buf);	
+	printk("Packet sent: %s\n", send_buf);
 	return 1;
 }
 
@@ -223,27 +229,37 @@ int poll_and_read(int client_fd)
 	int err;
 	char recv_buf[RECV_BUF_SIZE] = {0};
 	size_t ret_len;
-	struct pollfd fds[] = { { .fd = client_fd, .events = POLLIN } };
+	struct pollfd fds[] = {{.fd = client_fd, .events = POLLIN}};
+	s64_t start_time = k_uptime_get();
+	s64_t total_poll_time_ms = 0;
 
-	while(1)
+	while (1)
 	{
-		err = poll(fds, ARRAY_SIZE(fds), S_TO_MS(getTimeout() + TIMEOUT_TOL));
-		if (err < 0) {
+		err = poll(fds, ARRAY_SIZE(fds), POLL_TIMEOUT);
+		if (err < 0)
+		{
 			printk("poll, error: %d", err);
 
 			return -1;
 		}
-		else if (err == 0) 
+		else if (err == 0)
 		{
+			total_poll_time_ms += k_uptime_delta(&start_time);
+			if (total_poll_time_ms < S_TO_MS(get_timeout() + TIMEOUT_TOL))
+			{
+				printk("Elapsed time: %lld seconds\n", MS_TO_S(total_poll_time_ms));
+				continue;
+			}
+
 			printk("No response from server\n");
 			if (current_protocol == TIMEOUT_UDP)
 			{
-				max_timeout.udp_timeout = getTimeout();
+				max_timeout.udp_timeout = get_timeout();
 				return 0;
 			}
 			else if (current_protocol == TIMEOUT_TCP)
 			{
-				max_timeout.tcp_timeout = getTimeout();
+				max_timeout.tcp_timeout = get_timeout();
 				return 0;
 			}
 			else
@@ -251,10 +267,10 @@ int poll_and_read(int client_fd)
 				return -1;
 			}
 		}
-		else if ((fds[0].revents & POLLIN) == POLLIN) 
+		else if ((fds[0].revents & POLLIN) == POLLIN)
 		{
 			ret_len = recv(client_fd, recv_buf, sizeof(recv_buf) - 1, 0);
-			if (ret_len > 0 && ret_len < SEND_BUF_SIZE) 
+			if (ret_len > 0 && ret_len < SEND_BUF_SIZE)
 			{
 				// Received "invalid format" message
 				if (!strcmp(recv_buf, INV_FORMAT_MSG))
@@ -270,7 +286,7 @@ int poll_and_read(int client_fd)
 	}
 }
 
-static int setup_connection(int * client_fd)
+static int setup_connection(int *client_fd)
 {
 	int err;
 	struct addrinfo *res;
@@ -282,9 +298,10 @@ static int setup_connection(int * client_fd)
 	if (err < 0)
 	{
 		printk("LTE link not maintained.\nAttempting to reconnect...\n");
-		while(true){
+		while (true)
+		{
 			err = lte_lc_init_and_connect();
-			if (err) 
+			if (err)
 			{
 				printk("LTE link could not be established, error: %d\n", err);
 				continue;
@@ -296,7 +313,8 @@ static int setup_connection(int * client_fd)
 	if (current_protocol == TIMEOUT_UDP)
 	{
 		*client_fd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
-		if (client_fd <= 0) {
+		if (client_fd <= 0)
+		{
 			printk("socket() failed, errno: %d\n", errno);
 			return -1;
 		}
@@ -306,20 +324,22 @@ static int setup_connection(int * client_fd)
 	else if (current_protocol == TIMEOUT_TCP)
 	{
 		*client_fd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-		if (client_fd <= 0) {
+		if (client_fd <= 0)
+		{
 			printk("socket() failed, errno: %d\n", errno);
 			return -1;
 		}
 
 		hints.ai_socktype = SOCK_STREAM;
 	}
-	else 
+	else
 	{
 		return -1;
 	}
 
 	err = getaddrinfo(SERVER_HOSTNAME, NULL, &hints, &res);
-	if (err) {
+	if (err)
+	{
 		printk("getaddrinfo() failed, err %d\n", errno);
 		return -1;
 	}
@@ -333,15 +353,14 @@ static int setup_connection(int * client_fd)
 		((struct sockaddr_in *)res->ai_addr)->sin_port = htons(TCP_PORT);
 	}
 
-
 	err = connect(*client_fd, res->ai_addr, sizeof(struct sockaddr_in));
-	if (err) 
+	if (err)
 	{
 		printk("connect failed, errno: %d\n\r", errno);
 		return -1;
 	}
 
-	printk("Connected to server with protocol %s\n", getProtocolName(current_protocol));
+	printk("Connected to server with protocol %s\n", get_protocol_name(current_protocol));
 
 	return 0;
 }
@@ -356,7 +375,7 @@ void main(void)
 	printk("Setting up LTE connection\n");
 
 	err = lte_lc_init_and_connect();
-	if (err) 
+	if (err)
 	{
 		printk("LTE link could not be established, error: %d\n", err);
 		return;
@@ -367,7 +386,7 @@ void main(void)
 	cJSON_Init();
 
 	err = modem_info_init();
-	if (err) 
+	if (err)
 	{
 		printk("Modem info could not be initialised: %d\n", err);
 		return;
@@ -380,7 +399,7 @@ void main(void)
 		return;
 	}
 
-	while(current_protocol < NONE)
+	while (current_protocol < NONE)
 	{
 		err = send_data(client_fd);
 		if (err < 0)
@@ -397,28 +416,32 @@ void main(void)
 		}
 		else if (err == 0)
 		{
-			printk("Finished checking for protocol %s\n", getProtocolName(current_protocol));
+			printk("Finished checking for protocol %s\n", get_protocol_name(current_protocol));
 			current_protocol += 1;
-			if (strcmp(getProtocolName(current_protocol), "NONE"))
+			if (strcmp(get_protocol_name(current_protocol), "NONE"))
 			{
 				packet_counter = 1;
 				goto reconnect;
 			}
-			else 
+			else
 			{
 				err = close(client_fd);
-				if (err < 0) {}
+				if (err < 0)
+				{
+				}
 				break;
 			}
 		}
 		packet_counter++;
 
-		continue;	
+		continue;
 
-reconnect:
+	reconnect:
 
 		err = close(client_fd);
-		if (err < 0) {}
+		if (err < 0)
+		{
+		}
 
 		err = setup_connection(&client_fd);
 		if (err < 0)
@@ -432,4 +455,3 @@ reconnect:
 
 	(void)close(client_fd);
 }
-
