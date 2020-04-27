@@ -18,14 +18,11 @@
 #define TCP_PORT 3051
 #define SEND_BUF_SIZE 512
 #define RECV_BUF_SIZE 256
-#define UDP_INITIAL_TIMEOUT 1
-#define TCP_TIMEOUT_OFFSET 35
-#define TIMEOUT_INCREMENT(COUNTER) (((COUNTER) * (COUNTER)) / 4)
-#define POLL_TIMEOUT (S_TO_MS(60))
+#define TCP_INITIAL_TIMEOUT 200
+#define S_TO_MS_MULT 1000
+#define POLL_TIMEOUT (60 * S_TO_MS_MULT)
 #define TIMEOUT_TOL 5
 #define INV_FORMAT_MSG "Error occured.\nConnection closed.\n"
-#define S_TO_MS(S) ((S)*1000)
-#define MS_TO_S(MS) ((MS) / 1030)
 
 enum protocol
 {
@@ -38,24 +35,9 @@ struct timeout_struct
 {
 	int udp_timeout;
 	int tcp_timeout;
-} max_timeout;
+} timeout_rule;
 
 static enum protocol current_protocol = TIMEOUT_UDP;
-static int packet_counter = 1;
-
-static int get_timeout()
-{
-
-	if (current_protocol == TIMEOUT_UDP)
-	{
-		return UDP_INITIAL_TIMEOUT + TIMEOUT_INCREMENT(packet_counter);
-	}
-	else if (current_protocol == TIMEOUT_TCP)
-	{
-		return TIMEOUT_INCREMENT(packet_counter * TCP_TIMEOUT_OFFSET);
-	}
-	return -1;
-}
 
 static char *get_protocol_name(enum protocol protocol)
 {
@@ -103,7 +85,7 @@ static int json_add_number(cJSON *parent, const char *str, double item)
 	return json_add_obj(parent, str, json_num);
 }
 
-static int create_send_buffer(struct modem_param_info *modem_params, char *buffer)
+static int create_send_buffer(struct modem_param_info *modem_params, char *buffer, int timeout_s)
 {
 	int ret = 0;
 	cJSON *root_obj = cJSON_CreateObject();
@@ -138,7 +120,7 @@ static int create_send_buffer(struct modem_param_info *modem_params, char *buffe
 	ret += json_add_number(root_obj, "cell_id", modem_params->network.cellid_dec);
 	ret += json_add_number(root_obj, "ue_mode", modem_params->network.ue_mode.value);
 	ret += json_add_str(root_obj, "iccid", modem_params->sim.iccid.value_string);
-	ret += json_add_number(root_obj, "interval", get_timeout());
+	ret += json_add_number(root_obj, "interval", timeout_s);
 
 	if (ret)
 	{
@@ -185,7 +167,7 @@ static int lte_connection_check(void)
 	}
 }
 
-int send_data(int client_fd)
+int send_data(int client_fd, int timeout_s)
 {
 	int err;
 	char send_buf[SEND_BUF_SIZE] = {0};
@@ -206,7 +188,7 @@ int send_data(int client_fd)
 		return -1;
 	}
 
-	send_len = create_send_buffer(&modem_params, send_buf);
+	send_len = create_send_buffer(&modem_params, send_buf, timeout_s);
 	if (send_len < 0)
 	{
 		printk("Error creating json object: %d\n", send_len);
@@ -224,7 +206,7 @@ int send_data(int client_fd)
 	return 1;
 }
 
-int poll_and_read(int client_fd)
+int poll_and_read(int client_fd, int timeout_s)
 {
 	int err;
 	char recv_buf[RECV_BUF_SIZE] = {0};
@@ -245,27 +227,14 @@ int poll_and_read(int client_fd)
 		else if (err == 0)
 		{
 			total_poll_time_ms += k_uptime_delta(&start_time);
-			if (total_poll_time_ms < S_TO_MS(get_timeout() + TIMEOUT_TOL))
+			if (total_poll_time_ms < (timeout_s + TIMEOUT_TOL) * S_TO_MS_MULT)
 			{
-				printk("Elapsed time: %lld seconds\n", MS_TO_S(total_poll_time_ms));
+				printk("Elapsed time: %lld seconds\n", total_poll_time_ms / S_TO_MS_MULT);
 				continue;
 			}
 
 			printk("No response from server\n");
-			if (current_protocol == TIMEOUT_UDP)
-			{
-				max_timeout.udp_timeout = get_timeout();
-				return 0;
-			}
-			else if (current_protocol == TIMEOUT_TCP)
-			{
-				max_timeout.tcp_timeout = get_timeout();
-				return 0;
-			}
-			else
-			{
-				return -1;
-			}
+			return 0;
 		}
 		else if ((fds[0].revents & POLLIN) == POLLIN)
 		{
@@ -365,10 +334,79 @@ static int setup_connection(int *client_fd)
 	return 0;
 }
 
+int get_timeout(bool timed_out)
+{
+	static int udp_counter = 0;
+	static int curr_timeout = 0;
+	static int upper = 0;
+	static int lower = 0;
+	static bool using_binary_search = false;
+
+	// Switch to binary search
+	if (!using_binary_search && timed_out)
+	{
+		using_binary_search = true;
+	}
+
+	if (using_binary_search)
+	{
+		// Adjust bounds
+		if (timed_out)
+		{
+			upper = curr_timeout;
+		}
+		else
+		{
+			lower = curr_timeout;
+		}
+
+		// Found timeout rule
+		if ((upper - lower) == 1)
+		{
+			if (current_protocol == TIMEOUT_UDP)
+			{
+				timeout_rule.udp_timeout = upper;
+				printk("Finished measuring for %s.\nTimeout rule set at %d seconds\n", "UDP", upper);
+			}
+			else if (current_protocol == TIMEOUT_TCP)
+			{
+				timeout_rule.tcp_timeout = upper;
+				printk("Finished measuring for %s.\nTimeout rule set at %d seconds\n", "TCP", upper);
+			}
+
+			curr_timeout = 0;
+			using_binary_search = false;
+		}
+		else
+		{
+			curr_timeout = lower + ((upper - lower) / 2);
+		}
+	}
+	else
+	{
+		lower = curr_timeout;
+		if (current_protocol == TIMEOUT_UDP)
+		{
+			udp_counter++;
+			curr_timeout = udp_counter * udp_counter;
+		}
+		else if (current_protocol == TIMEOUT_TCP)
+		{
+			if (curr_timeout == 0)
+			{
+				curr_timeout = TCP_INITIAL_TIMEOUT;
+			}
+			curr_timeout *= 1.5;
+		}
+	}
+	return curr_timeout;
+}
+
 void main(void)
 {
 	int err;
 	int client_fd;
+	int timeout_s = get_timeout(false);
 
 	printk("TCP client started\n");
 
@@ -401,7 +439,7 @@ void main(void)
 
 	while (current_protocol < NONE)
 	{
-		err = send_data(client_fd);
+		err = send_data(client_fd, timeout_s);
 		if (err < 0)
 		{
 			goto reconnect;
@@ -409,18 +447,26 @@ void main(void)
 
 		printk("Waiting for response...\n");
 
-		err = poll_and_read(client_fd);
+		err = poll_and_read(client_fd, timeout_s);
 		if (err < 0)
 		{
 			goto reconnect;
 		}
 		else if (err == 0)
 		{
-			printk("Finished checking for protocol %s\n", get_protocol_name(current_protocol));
-			current_protocol += 1;
+			timeout_s = get_timeout(true);
+		}
+		else if (err > 0)
+		{
+			timeout_s = get_timeout(false);
+		}
+
+		if (timeout_s == 0)
+		{
+			current_protocol++;
 			if (strcmp(get_protocol_name(current_protocol), "NONE"))
 			{
-				packet_counter = 1;
+				timeout_s = get_timeout(false);
 				goto reconnect;
 			}
 			else
@@ -432,7 +478,6 @@ void main(void)
 				break;
 			}
 		}
-		packet_counter++;
 
 		continue;
 
@@ -451,7 +496,7 @@ void main(void)
 		}
 	}
 
-	printk("Finished NAT timeout measurements.\nUDP timed out at: %d seconds\nTCP timed out at: %d seconds\n", max_timeout.udp_timeout, max_timeout.tcp_timeout);
+	printk("Finished NAT timeout measurements.\nUDP timed out at: %d seconds\nTCP timed out at: %d seconds\n", timeout_rule.udp_timeout, timeout_rule.tcp_timeout);
 
 	(void)close(client_fd);
 }
