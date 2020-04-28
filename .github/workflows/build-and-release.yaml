@@ -16,7 +16,7 @@ jobs:
         run: |
           npm ci
           export NEXT_VERSION=`node .github/workflows/get-next-version.js`
-          echo "CONFIG_CAT_TRACKER_APP_VERSION=\"$NEXT_VERSION\"" >> prj.conf
+          echo "CONFIG_NAT_TEST_VERSION=\"$NEXT_VERSION\"" >> prj.conf
           echo $NEXT_VERSION
 
       - name: Build image
