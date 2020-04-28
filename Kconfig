@@ -1,0 +1,24 @@
+#
+# Copyright (c) 2018 Nordic Semiconductor ASA
+#
+# SPDX-License-Identifier: LicenseRef-BSD-5-Clause-Nordic
+#
+
+menu "NAT Test Firmware"
+
+menu "Firmware versioning"
+
+config NAT_TEST_VERSION
+	string "The version of the NAT Test Firmware"
+	default "0.0.0-development"
+
+endmenu # Firmware versioning
+
+endmenu # NAT Test Firmware
+
+menu "Zephyr Kernel"
+source "$ZEPHYR_BASE/Kconfig.zephyr"
+endmenu
+
+module = NAT_TEST
+module-str = NAT Test Firmware

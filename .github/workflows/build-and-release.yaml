@@ -1,0 +1,33 @@
+name: Build and Release
+
+on: push
+
+env:
+  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v1
+
+      - name: Determine next release version
+        run: |
+          npm ci
+          export NEXT_VERSION=`node .github/workflows/get-next-version.js`
+          echo "CONFIG_NAT_TEST_VERSION=\"$NEXT_VERSION\"" >> prj.conf
+          echo $NEXT_VERSION
+
+      - name: Build image
+        run: docker build -t nat-testfirmware-docker .
+
+      - name: Build
+        run: |
+          docker run --rm -v ${PWD}:/workdir/ncs/firmware nat-testfirmware-docker /bin/bash -c 'cd ncs/firmware; west build -p always -b nrf9160_pca10090ns'
+          cp -v build/zephyr/merged.hex ${GITHUB_WORKSPACE}/nat-test-nrf9160_pca10090ns.hex
+
+      - name: Semantic release
+        continue-on-error: true
+        run: |
+          npx semantic-release

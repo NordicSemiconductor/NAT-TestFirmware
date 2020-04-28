@@ -412,7 +412,7 @@ void main(void)
 	int timeout_s = get_timeout(false);
 
 	printk("TCP client started\n");
-
+	printk("Version: %s\n", CONFIG_NAT_TEST_VERSION);
 	printk("Setting up LTE connection\n");
 
 	err = lte_lc_init_and_connect();

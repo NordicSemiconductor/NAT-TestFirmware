@@ -1,0 +1,56 @@
+{
+  "name": "@nordicsemiconductor/nat-testfirmware",
+  "version": "0.0.0-development",
+  "description": "Used to test NAT timeouts in different networks",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/NordicSemiconductor/NAT-TestFirmware.git"
+  },
+  "bugs": {
+    "url": "https://github.com/NordicSemiconductor/NAT-TestFirmware/issues"
+  },
+  "homepage": "https://github.com/NordicSemiconductor/NAT-TestFirmware#nat-test-firmware",
+  "keywords": [
+    "Test",
+    "NAT",
+    "CellularIoT",
+    "NordicSemiconductor"
+  ],
+  "author": "Nordic Semiconductor ASA | nordicsemi.no",
+  "license": "BSD-5-Clause-Nordic",
+  "devDependencies": {
+    "@commitlint/cli": "^8.3.5",
+    "@commitlint/config-angular": "^8.3.4",
+    "@semantic-release/commit-analyzer": "^8.0.1",
+    "husky": "^4.2.3",
+    "semantic-release": "^17.0.4",
+    "stream-buffers": "^3.0.2"
+  },
+  "husky": {
+    "hooks": {
+      "commit-msg": "commitlint -e"
+    }
+  },
+  "release": {
+    "branches": [
+      "saga"
+    ],
+    "remoteTags": true,
+    "plugins": [
+      "@semantic-release/commit-analyzer",
+      "@semantic-release/release-notes-generator",
+      [
+        "@semantic-release/github",
+        {
+          "assets": [
+            {
+              "path": "/home/runner/work/NAT-TestFirmware/NAT-TestFirmware/nat-test-nrf9160_pca10090ns.hex",
+              "name": "nat-test-PCA10090-nRF9160DK-${nextRelease.gitTag}.hex",
+              "label": "Pre-build HEX file for PCA10090 / nRF9160 DK (${nextRelease.gitTag})"
+            }
+          ]
+        }
+      ]
+    ]
+  }
+}
