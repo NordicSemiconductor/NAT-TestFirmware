@@ -14,6 +14,8 @@ config NAT_TEST_VERSION
 
 endmenu # Firmware versioning
 
+endmenu # NAT Test Firmware
+
 menu "Zephyr Kernel"
 source "$ZEPHYR_BASE/Kconfig.zephyr"
 endmenu
