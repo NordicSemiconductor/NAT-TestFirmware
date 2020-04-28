@@ -44,7 +44,7 @@
         {
           "assets": [
             {
-              "path": "/home/runner/work/firmware/firmware/nat-test-nrf9160_pca10090ns.hex",
+              "path": "/home/runner/work/NAT-TestFirmware/NAT-TestFirmware/nat-test-nrf9160_pca10090ns.hex",
               "name": "nat-test-PCA10090-nRF9160DK-${nextRelease.gitTag}.hex",
               "label": "Pre-build HEX file for PCA10090 / nRF9160 DK (${nextRelease.gitTag})"
             }
