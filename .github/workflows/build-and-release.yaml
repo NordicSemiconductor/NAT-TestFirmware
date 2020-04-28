@@ -25,6 +25,7 @@ jobs:
       - name: Build
         run: |
           docker run --rm -v ${PWD}:/workdir/ncs/firmware nat-testfirmware-docker /bin/bash -c 'cd ncs/firmware; west build -p always -b nrf9160_pca10090ns'
+          ls -la build/zephyr
           cp -v build/zephyr/merged.hex ${GITHUB_WORKSPACE}/nat-test-nrf9160_pca10090ns.hex
           cp -v build/zephyr/app_update.bin ${GITHUB_WORKSPACE}/nat-test-nrf9160_pca10090ns-app_update.bin
 
