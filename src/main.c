@@ -33,9 +33,9 @@ enum protocol
 
 struct timeout_struct
 {
-	int udp_timeout;
-	int tcp_timeout;
-} timeout_rule;
+	int udp;
+	int tcp;
+} keep_alive_time;
 
 static enum protocol current_protocol = TIMEOUT_UDP;
 
@@ -368,13 +368,13 @@ int get_timeout(bool timed_out)
 		{
 			if (current_protocol == TIMEOUT_UDP)
 			{
-				timeout_rule.udp_timeout = upper;
-				printk("Finished measuring for %s.\nTimeout rule set at %d seconds\n", "UDP", upper);
+				keep_alive_time.udp = lower;
+				printk("Finished measuring for %s.\nKeep-alive time set at: %d seconds\n", "UDP", upper);
 			}
 			else if (current_protocol == TIMEOUT_TCP)
 			{
-				timeout_rule.tcp_timeout = upper;
-				printk("Finished measuring for %s.\nTimeout rule set at %d seconds\n", "TCP", upper);
+				keep_alive_time.tcp = lower;
+				printk("Finished measuring for %s.\nKeep-alive time set at: %d seconds\n", "TCP", upper);
 			}
 
 			curr_timeout = 0;
@@ -499,7 +499,7 @@ void main(void)
 		}
 	}
 
-	printk("Finished NAT timeout measurements.\nUDP timed out at: %d seconds\nTCP timed out at: %d seconds\n", timeout_rule.udp_timeout, timeout_rule.tcp_timeout);
+	printk("Finished NAT timeout measurements.\nUDP keep-alive time: %d seconds\nTCP keep-alive time: %d seconds\n", keep_alive_time.udp, keep_alive_time.tcp);
 
 	(void)close(client_fd);
 }
