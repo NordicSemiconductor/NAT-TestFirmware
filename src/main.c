@@ -122,6 +122,7 @@ static int create_send_buffer(struct modem_param_info *modem_params, char *buffe
 	ret += json_add_number(root_obj, "lte_mode", modem_params->network.lte_mode.value);
 	ret += json_add_number(root_obj, "nbiot_mode", modem_params->network.nbiot_mode.value);
 	ret += json_add_str(root_obj, "iccid", modem_params->sim.iccid.value_string);
+	ret += json_add_str(root_obj, "imei", modem_params->device.imei.value_string);
 	ret += json_add_number(root_obj, "interval", timeout_s);
 
 	if (ret)
