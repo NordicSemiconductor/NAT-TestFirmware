@@ -10,4 +10,4 @@ Used to test NAT timeouts in different networks, sends messages to [NAT-TestServ
 
 ## Automated releases
 
-This project uses [Semantic Release](https://github.com/semantic-release/semantic-release) to automate releases. Every commit is run using [GitHub Actions](https://github.com/features/actions) and depending on the commit message an new GitHub [release](https://github.com/bifravst/firmware/releases) is created and pre-build hex-files for all supported boards are attached.
+This project uses [Semantic Release](https://github.com/semantic-release/semantic-release) to automate releases. Every commit is run using [GitHub Actions](https://github.com/features/actions) and depending on the commit message an new GitHub [release](https://github.com/NordicSemiconductor/NAT-TestFirmware/releases) is created and pre-build hex-files for all supported boards are attached.
