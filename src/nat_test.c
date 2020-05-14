@@ -24,14 +24,16 @@
 #define THREAD_STACK_SIZE 8192
 #define S_TO_MS_MULT 1000
 #define POLL_TIMEOUT_S 3
-#define POLL_LOG_THRESHOLD_MS (60 * S_TO_MS_MULT)
+#define WAIT_LOG_THRESHOLD_MS (60 * S_TO_MS_MULT)
 #define TIMEOUT_TOL_S 10
 #define MAX_RECONNECT_ATTEMPTS 5
-#define WAIT_AFTER_RECONNECT 2
+#define CONNECTION_TIMEOUT_M CONFIG_LTE_NETWORK_TIMEOUT
 #define DEFAULT_UDP_INITIAL_TIMEOUT 1
 #define DEFAULT_TCP_INITIAL_TIMEOUT 300
 #define DEFAULT_UDP_TIMEOUT_MULTIPLIER 2
 #define DEFAULT_TCP_TIMEOUT_MULTIPLIER 1.5
+#define DEFAULT_CONNECTION_MODE LTE_LC_SYSTEM_MODE_LTEM
+#define DEFAULT_CONNECTION_STATE LTE_LC_NW_REG_NOT_REGISTERED
 #define BUF_SIZE 512
 #define IP_STRINGS_COUNT 10
 
@@ -41,6 +43,11 @@ enum test_state {
     RUNNING,
     ABORT
 };
+
+struct connection {
+    atomic_t mode;  // lte_lc_system_mode
+    atomic_t state; // lte_lc_nw_reg_status
+} connection;
 
 struct test_thread_timeout {
     int timeout;
@@ -63,6 +70,8 @@ struct test_thread {
     k_thread_stack_t *stack_area;
     struct test_thread_data thread_data;
 };
+
+K_SEM_DEFINE(lte_connected, 0, 1);
 
 K_THREAD_STACK_DEFINE(thread_stack_area, THREAD_STACK_SIZE);
 
@@ -111,6 +120,39 @@ void set_timeout_multiplier(enum test_type type, float value)
     } else if (type == TEST_TCP) {
         tcp_timeout_multiplier = value;
     }
+}
+
+int get_network_mode()
+{
+    return atomic_get(&connection.state);
+}
+
+int set_network_mode(int mode)
+{
+    if (mode != LTE_LC_SYSTEM_MODE_LTEM && mode != LTE_LC_SYSTEM_MODE_NBIOT) {
+        return -INVALID_MODE;
+    } else if (atomic_get(&test_thread.thread_data.state) != IDLE) {
+        return -TEST_RUNNING;
+    } else if (atomic_get(&connection.mode) == mode) {
+        return 0;
+    }
+
+    atomic_set(&connection.mode, mode);
+
+    lte_lc_offline();
+    lte_lc_system_mode_set(mode);
+    lte_lc_normal();
+
+    while (atomic_get(&connection.state) == LTE_LC_NW_REG_NOT_REGISTERED) {
+        k_sleep(K_SECONDS(POLL_TIMEOUT_S));
+    }
+
+    return 0;
+}
+
+int get_network_state()
+{
+    return atomic_get(&connection.mode);
 }
 
 static void shell_check_and_print(const struct shell *shell, const char *fmt, ...)
@@ -286,7 +328,7 @@ static int poll_and_read(int client_fd, int timeout_s, const struct shell *shell
             per_log_poll_time_ms += delta;
             total_poll_time_ms += delta;
             if (total_poll_time_ms <= (timeout_s + TIMEOUT_TOL_S) * S_TO_MS_MULT) {
-                if (per_log_poll_time_ms >= POLL_LOG_THRESHOLD_MS) {
+                if (per_log_poll_time_ms >= WAIT_LOG_THRESHOLD_MS) {
                     shell_check_and_print(shell, "Elapsed time: %d seconds\n", total_poll_time_ms / S_TO_MS_MULT);
                     per_log_poll_time_ms = 0;
                 }
@@ -313,31 +355,67 @@ static int poll_and_read(int client_fd, int timeout_s, const struct shell *shell
     }
 }
 
-static int lte_connection_check(const struct shell *shell)
+static void lte_handler(const struct lte_lc_evt *const evt)
 {
-    int err;
-    enum lte_lc_nw_reg_status nw_reg_status;
-
-    for (int i = 0; i < MAX_RECONNECT_ATTEMPTS; i++) {
-        err = lte_lc_nw_reg_status_get(&nw_reg_status);
-        if (err) {
-            shell_check_and_print(shell,
-                                  "lte_lc_nw_reg_status_get, error: %d\n", err);
-            return err;
+    static bool init_connect = true;
+    switch (evt->type) {
+    case LTE_LC_EVT_NW_REG_STATUS:
+        if (init_connect) {
+            if ((evt->nw_reg_status == LTE_LC_NW_REG_REGISTERED_HOME) || (evt->nw_reg_status == LTE_LC_NW_REG_REGISTERED_ROAMING)) {
+                k_sem_give(&lte_connected);
+                init_connect = false;
+            }
         }
+        atomic_set(&connection.state, evt->nw_reg_status);
+        break;
+    default:
+        break;
+    }
+}
+
+static int lte_connection_check(const struct shell *shell, atomic_t *state)
+{
+    enum lte_lc_nw_reg_status nw_reg_status = atomic_get(&connection.state);
+    s64_t start_time_ms = k_uptime_get();
+    s64_t reconnect_attempt_time_ms = 0;
+    int log_counter = 0;
+    int i = 0;
+
+    if ((nw_reg_status != LTE_LC_NW_REG_REGISTERED_HOME) && (nw_reg_status != LTE_LC_NW_REG_REGISTERED_ROAMING)) {
+        shell_check_and_print(shell, "LTE link not maintained.\nAttempting to reconnect with %d min timeout (%d/%d)...\n", CONNECTION_TIMEOUT_M, i + 1, MAX_RECONNECT_ATTEMPTS);
+    }
+
+    while (i < MAX_RECONNECT_ATTEMPTS) {
+        if (atomic_get(state) == ABORT) {
+            return -1;
+        }
+        nw_reg_status = atomic_get(&connection.state);
 
         if ((nw_reg_status != LTE_LC_NW_REG_REGISTERED_HOME) && (nw_reg_status != LTE_LC_NW_REG_REGISTERED_ROAMING)) {
-            shell_check_and_print(shell, "LTE link not maintained.\nAttempting to reconnect (%d/%d)...\n", i + 1, MAX_RECONNECT_ATTEMPTS);
-            lte_lc_init_and_connect();
-            k_sleep(K_SECONDS(WAIT_AFTER_RECONNECT));
+            if ((nw_reg_status == LTE_LC_NW_REG_NOT_REGISTERED) || (nw_reg_status == LTE_LC_NW_REG_REGISTRATION_DENIED)) {
+                i++;
+                lte_lc_offline();
+                lte_lc_system_mode_set(atomic_get(&connection.mode));
+                lte_lc_normal();
+                shell_check_and_print(shell, "LTE link not maintained.\nAttempting to reconnect with %d min timeout (%d/%d)...\n", CONNECTION_TIMEOUT_M, i + 1, MAX_RECONNECT_ATTEMPTS);
+            }
         } else {
             return 0;
         }
+        k_sleep(K_SECONDS(POLL_TIMEOUT_S));
+        reconnect_attempt_time_ms += k_uptime_delta(&start_time_ms);
+
+        if (reconnect_attempt_time_ms >= WAIT_LOG_THRESHOLD_MS) {
+            log_counter++;
+            shell_check_and_print(shell, "Elapsed time: %d seconds\n", (reconnect_attempt_time_ms / S_TO_MS_MULT) * log_counter);
+            reconnect_attempt_time_ms = 0;
+        }
     }
+    shell_check_and_print(shell, "LTE link could not be established.\n");
     return -1;
 }
 
-static int setup_connection(int *client_fd, enum test_type type, const struct shell *shell)
+static int setup_connection(int *client_fd, enum test_type type, const struct shell *shell, atomic_t *state)
 {
     int err;
     struct addrinfo *res;
@@ -345,11 +423,13 @@ static int setup_connection(int *client_fd, enum test_type type, const struct sh
         .ai_family = AF_INET,
     };
 
-    err = lte_connection_check(shell);
+    err = lte_connection_check(shell, state);
     if (err < 0) {
-        shell_check_and_print(
-            shell, "LTE link could not be established.\nResetting...\n");
+#if defined(CONFIG_LTE_RESET_WHEN_UNABLE_TO_RECONNECT)
+        shell_check_and_print(shell, "LTE link could not be established.\nResetting...\n");
         sys_reboot(SYS_REBOOT_WARM);
+#endif
+        return -1;
     }
 
     if (type == TEST_UDP) {
@@ -419,17 +499,17 @@ static void init_values(struct test_thread_timeout *timeout_data, enum test_type
     timeout_data->upper = 0;
 
     switch (type) {
-        case TEST_UDP:
-            timeout_data->timeout = udp_initial_timeout;
-            timeout_data->multiplier = udp_timeout_multiplier;
-            break;
-        case TEST_TCP:
-            timeout_data->timeout = tcp_initial_timeout;
-            timeout_data->multiplier = tcp_timeout_multiplier;
-            break;
-        default:
-            /* Unused */
-            break;
+    case TEST_UDP:
+        timeout_data->timeout = udp_initial_timeout;
+        timeout_data->multiplier = udp_timeout_multiplier;
+        break;
+    case TEST_TCP:
+        timeout_data->timeout = tcp_initial_timeout;
+        timeout_data->multiplier = tcp_timeout_multiplier;
+        break;
+    default:
+        /* Unused */
+        break;
     }
 }
 
@@ -446,9 +526,8 @@ static void nat_test_run_single(enum test_type type, const struct shell *shell, 
 
     init_values(timeout_data, type);
 
-    err = setup_connection(&client_fd, type, shell);
+    err = setup_connection(&client_fd, type, shell, state);
     if (err < 0) {
-        shell_check_and_print(shell, "Failed to reconfigure connection: %d\n", errno);
         return;
     }
 
@@ -469,7 +548,6 @@ static void nat_test_run_single(enum test_type type, const struct shell *shell, 
         if (err < 0) {
             goto reconnect;
         } else if (err == 0) {
-
             using_binary_search = true;
             finished = get_timeout_binary_search(timeout_data, true);
         } else if (err > 0 && using_binary_search) {
@@ -486,9 +564,8 @@ static void nat_test_run_single(enum test_type type, const struct shell *shell, 
     reconnect:
         close(client_fd);
 
-        err = setup_connection(&client_fd, type, shell);
+        err = setup_connection(&client_fd, type, shell, state);
         if (err < 0) {
-            shell_check_and_print(shell, "Failed to reconfigure connection: %d\n", errno);
             return;
         }
     }
@@ -513,12 +590,12 @@ static void nat_test_run_both(struct test_thread_data *thread_data)
 int nat_test_start(enum test_type type, const struct shell *shell)
 {
     switch (atomic_get(&test_thread.thread_data.state)) {
-        case RUNNING:
-        case ABORT:
-            return -1;
-        case IDLE:
-        default:
-            break;
+    case RUNNING:
+    case ABORT:
+        return -1;
+    case IDLE:
+    default:
+        break;
     }
 
     atomic_set(&test_thread.thread_data.type, type);
@@ -531,18 +608,18 @@ int nat_test_start(enum test_type type, const struct shell *shell)
 int nat_test_stop(void)
 {
     switch (atomic_get(&test_thread.thread_data.state)) {
-        case RUNNING:
-            atomic_set(&test_thread.thread_data.state, ABORT);
-        case ABORT:
-            /* Make sure thread has enough time to detect abort request */
-            k_sleep(K_SECONDS(POLL_TIMEOUT_S * 2));
-            if (atomic_get(&test_thread.thread_data.state) != IDLE) {
-                return -1;
-            }
-            break;
-        case IDLE:
-        default:
-            break;
+    case RUNNING:
+        atomic_set(&test_thread.thread_data.state, ABORT);
+    case ABORT:
+        /* Make sure thread has enough time to detect abort request */
+        k_sleep(K_SECONDS(POLL_TIMEOUT_S * 2));
+        if (atomic_get(&test_thread.thread_data.state) != IDLE) {
+            return -1;
+        }
+        break;
+    case IDLE:
+    default:
+        break;
     }
 
     return 0;
@@ -552,21 +629,25 @@ static void nat_test_thread_entry_point(void *param, void *unused, void *unused2
 {
     struct test_thread_data *thread_data = (struct test_thread_data *)param;
 
+    atomic_set(&thread_data->state, IDLE);
+
     while (true) {
         k_sem_take(&thread_data->sem, K_FOREVER);
 
         atomic_set(&thread_data->state, RUNNING);
+
+        shell_check_and_print(thread_data->shell, "Test started\n");
         switch (atomic_get(&thread_data->type)) {
-            case TEST_UDP:
-            case TEST_TCP:
-                nat_test_run_single(thread_data->type, thread_data->shell, &thread_data->timeout_data, &thread_data->state);
-                break;
-            case TEST_UDP_AND_TCP:
-                nat_test_run_both(thread_data);
-                break;
-            default:
-                shell_check_and_print(thread_data->shell, "Thread with invalid type started");
-                return;
+        case TEST_UDP:
+        case TEST_TCP:
+            nat_test_run_single(thread_data->type, thread_data->shell, &thread_data->timeout_data, &thread_data->state);
+            break;
+        case TEST_UDP_AND_TCP:
+            nat_test_run_both(thread_data);
+            break;
+        default:
+            shell_check_and_print(thread_data->shell, "Thread with invalid type started");
+            return;
         }
         atomic_set(&thread_data->state, IDLE);
     }
@@ -590,20 +671,13 @@ int nat_test_init()
     printk("NAT-test client started\n");
     printk("Version: %s\n", CONFIG_NAT_TEST_VERSION);
 
-    printk("Setting up LTE connection\n");
-
     udp_initial_timeout = DEFAULT_UDP_INITIAL_TIMEOUT;
     tcp_initial_timeout = DEFAULT_TCP_INITIAL_TIMEOUT;
     udp_timeout_multiplier = DEFAULT_UDP_TIMEOUT_MULTIPLIER;
     tcp_timeout_multiplier = DEFAULT_TCP_TIMEOUT_MULTIPLIER;
 
-    err = lte_lc_init_and_connect();
-    if (err) {
-        printk("LTE link could not be established, error: %d\n", err);
-        return -1;
-    }
-
-    printk("LTE connected\n");
+    atomic_set(&connection.mode, DEFAULT_CONNECTION_MODE);
+    atomic_set(&connection.state, DEFAULT_CONNECTION_STATE);
 
     cJSON_Init();
 
@@ -614,6 +688,21 @@ int nat_test_init()
     }
 
     prepare_and_start_thread(&test_thread);
+
+    printk("Setting up LTE connection\n");
+
+    err = lte_lc_init_and_connect_async(lte_handler);
+    if (err) {
+        printk("LTE link could not be established, error: %d\n", err);
+        return -1;
+    }
+
+    if (k_sem_take(&lte_connected, K_MINUTES(CONNECTION_TIMEOUT_M)) != 0) {
+        printk("LTE link could not be established\n");
+        return -1;
+    }
+
+    printk("LTE connected\n");
 
     return 0;
 }
