@@ -31,15 +31,15 @@ static void handle_at_cmd(const struct shell *shell, size_t argc, char **argv)
     }
 
     switch (state) {
-        case AT_CMD_OK:
-            shell_print(shell, "%s\n", response);
-            shell_print(shell, "OK\n");
-            break;
-        case AT_CMD_ERROR:
-            shell_print(shell, "ERROR\n");
-            break;
-        default:
-            break;
+    case AT_CMD_OK:
+        shell_print(shell, "%s\n", response);
+        shell_print(shell, "OK\n");
+        break;
+    case AT_CMD_ERROR:
+        shell_print(shell, "ERROR\n");
+        break;
+    default:
+        break;
     }
 }
 
@@ -138,31 +138,59 @@ static void handle_start_test(const struct shell *shell, size_t argc, char **arg
         shell_print(shell, "Another test is still active\n");
         return;
     }
-    shell_print(shell, "Test was started");
 }
 
 static void handle_stop_test(const struct shell *shell, size_t argc, char **argv)
 {
-    int err;
-
-    err = nat_test_stop();
+    int err = nat_test_stop();
     if (err < 0) {
-        shell_print(shell, "Unable to stop running test\n");
+        shell_print(shell, "Unable to stop running test\nTry again in a few minutes\n");
         return;
     }
     shell_print(shell, "Test stopped\n");
 }
 
-SHELL_STATIC_SUBCMD_SET_CREATE(
-    test_timeout_accessor_cmds,
-    SHELL_CMD(set, NULL, "Set initial timeout", handle_set_timeout),
-    SHELL_CMD(get, NULL, "Get initial timeout", handle_get_timeout),
-    SHELL_SUBCMD_SET_END);
-SHELL_STATIC_SUBCMD_SET_CREATE(
-    test_multiplier_accessor_cmds,
-    SHELL_CMD(set, NULL, "Set timeout multiplier", handle_set_multiplier),
-    SHELL_CMD(get, NULL, "Get timeout multiplier", handle_get_multiplier),
-    SHELL_SUBCMD_SET_END);
+static void handle_get_network_mode(const struct shell *shell, size_t argc, char **argv)
+{
+    shell_print(shell, "Network mode: %d\n", get_network_mode());
+}
+
+static void handle_set_network_mode(const struct shell *shell, size_t argc, char **argv)
+{
+    char *unused;
+    long value = strtol(argv[1], &unused, 10);
+    int err = set_network_mode(value);
+    if (err == -INVALID_MODE) {
+        shell_print(shell, "Invalid mode\n");
+    } else if (err == -TEST_RUNNING) {
+        shell_print(shell, "Active test - Unable to change mode\n");
+    }
+
+    shell_print(shell, "Changed network mode to %d\n", value);
+}
+
+static void handle_get_network_state(const struct shell *shell, size_t argc, char **argv)
+{
+    shell_print(shell, "Network connection state: %d\n", get_network_state());
+}
+
+SHELL_STATIC_SUBCMD_SET_CREATE(network_mode_accessor_cmds,
+                               SHELL_CMD(set, NULL, "Set network mode", handle_set_network_mode),
+                               SHELL_CMD(get, NULL, "Get network mode", handle_get_network_mode),
+                               SHELL_SUBCMD_SET_END);
+SHELL_STATIC_SUBCMD_SET_CREATE(network_conf_cmds,
+                               SHELL_CMD(mode, &network_mode_accessor_cmds, "Configure netowkr mode", NULL),
+                               SHELL_CMD(state, NULL, "Get network state", handle_get_network_state),
+                               SHELL_SUBCMD_SET_END);
+
+SHELL_STATIC_SUBCMD_SET_CREATE(test_timeout_accessor_cmds,
+                               SHELL_CMD(set, NULL, "Set initial timeout", handle_set_timeout),
+                               SHELL_CMD(get, NULL, "Get initial timeout", handle_get_timeout),
+                               SHELL_SUBCMD_SET_END);
+SHELL_STATIC_SUBCMD_SET_CREATE(test_multiplier_accessor_cmds,
+                               SHELL_CMD(set, NULL, "Set timeout multiplier", handle_set_multiplier),
+                               SHELL_CMD(get, NULL, "Get timeout multiplier", handle_get_multiplier),
+                               SHELL_SUBCMD_SET_END);
 SHELL_STATIC_SUBCMD_SET_CREATE(test_conf_cmds,
                                SHELL_CMD(initial_timeout, &test_timeout_accessor_cmds, "Configure initial timeout", NULL),
                                SHELL_CMD(timeout_multiplier, &test_multiplier_accessor_cmds, "Configure timeout multiplier", NULL),
@@ -172,9 +200,10 @@ SHELL_STATIC_SUBCMD_SET_CREATE(test_conf_types_cmds,
                                SHELL_CMD(tcp, &test_conf_cmds, "Configure TCP test parameters", NULL),
                                SHELL_SUBCMD_SET_END);
 SHELL_STATIC_SUBCMD_SET_CREATE(conf_cmds,
-                               SHELL_CMD(test, &test_conf_types_cmds, "Configure test parameters", NULL),
+                               SHELL_CMD(test, &test_conf_types_cmds, "Read/Edit test parameters", NULL),
+                               SHELL_CMD(network, &network_conf_cmds, "Read/Edit network parameters", NULL),
                                SHELL_SUBCMD_SET_END);
-SHELL_CMD_REGISTER(configure, &conf_cmds, "Configure NAT-test client parameters", handle_at_cmd);
+SHELL_CMD_REGISTER(config, &conf_cmds, "Read/Edit NAT-test client parameters", NULL);
 
 SHELL_CMD_REGISTER(stop_running_test, NULL, "Stop running test", handle_stop_test);
 
