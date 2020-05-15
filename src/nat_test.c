@@ -329,7 +329,7 @@ static int poll_and_read(int client_fd, int timeout_s, const struct shell *shell
             total_poll_time_ms += delta;
             if (total_poll_time_ms <= (timeout_s + TIMEOUT_TOL_S) * S_TO_MS_MULT) {
                 if (per_log_poll_time_ms >= WAIT_LOG_THRESHOLD_MS) {
-                    shell_check_and_print(shell, "Elapsed time: %d seconds\n", total_poll_time_ms / S_TO_MS_MULT);
+                    shell_check_and_print(shell, "Elapsed time: %d of %d seconds (%d seconds tolerance)\n", total_poll_time_ms / S_TO_MS_MULT, timeout_s + TIMEOUT_TOL_S, TIMEOUT_TOL_S);
                     per_log_poll_time_ms = 0;
                 }
 
@@ -379,13 +379,13 @@ static int lte_connection_check(const struct shell *shell, atomic_t *state)
     s64_t start_time_ms = k_uptime_get();
     s64_t reconnect_attempt_time_ms = 0;
     int log_counter = 0;
-    int i = 0;
+    int attempt_counter = 0;
 
     if ((nw_reg_status != LTE_LC_NW_REG_REGISTERED_HOME) && (nw_reg_status != LTE_LC_NW_REG_REGISTERED_ROAMING)) {
-        shell_check_and_print(shell, "LTE link not maintained.\nAttempting to reconnect with %d min timeout (%d/%d)...\n", CONNECTION_TIMEOUT_M, i + 1, MAX_RECONNECT_ATTEMPTS);
+        shell_check_and_print(shell, "LTE link not maintained.\nAttempting to reconnect, attempt (%d/%d)...\n", i + 1, MAX_RECONNECT_ATTEMPTS);
     }
 
-    while (i < MAX_RECONNECT_ATTEMPTS) {
+    while (attempt_counter < MAX_RECONNECT_ATTEMPTS) {
         if (atomic_get(state) == ABORT) {
             return -1;
         }
@@ -393,11 +393,11 @@ static int lte_connection_check(const struct shell *shell, atomic_t *state)
 
         if ((nw_reg_status != LTE_LC_NW_REG_REGISTERED_HOME) && (nw_reg_status != LTE_LC_NW_REG_REGISTERED_ROAMING)) {
             if ((nw_reg_status == LTE_LC_NW_REG_NOT_REGISTERED) || (nw_reg_status == LTE_LC_NW_REG_REGISTRATION_DENIED)) {
-                i++;
+                attempt_counter++;
                 lte_lc_offline();
                 lte_lc_system_mode_set(atomic_get(&connection.mode));
                 lte_lc_normal();
-                shell_check_and_print(shell, "LTE link not maintained.\nAttempting to reconnect with %d min timeout (%d/%d)...\n", CONNECTION_TIMEOUT_M, i + 1, MAX_RECONNECT_ATTEMPTS);
+                shell_check_and_print(shell, "LTE link not maintained.\nAttempting to reconnect, attempt: (%d/%d)...\n", attempt_counter + 1, MAX_RECONNECT_ATTEMPTS);
             }
         } else {
             return 0;
@@ -407,7 +407,7 @@ static int lte_connection_check(const struct shell *shell, atomic_t *state)
 
         if (reconnect_attempt_time_ms >= WAIT_LOG_THRESHOLD_MS) {
             log_counter++;
-            shell_check_and_print(shell, "Elapsed time: %d seconds\n", (reconnect_attempt_time_ms / S_TO_MS_MULT) * log_counter);
+            shell_check_and_print(shell, "Elapsed time/network timeout: %d/%d seconds\n", (reconnect_attempt_time_ms / S_TO_MS_MULT) * log_counter, CONNECTION_TIMEOUT_M);
             reconnect_attempt_time_ms = 0;
         }
     }
