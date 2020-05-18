@@ -4,50 +4,29 @@
  * SPDX-License-Identifier: LicenseRef-BSD-5-Clause-Nordic
  */
 
-#include "nat_test.h"
-
+#include <zephyr.h>
 #include <cJSON.h>
 #include <cJSON_os.h>
 #include <modem/lte_lc.h>
 #include <modem/modem_info.h>
 #include <net/socket.h>
-#include <power/reboot.h>
-#include <shell/shell.h>
-#include <shell/shell_uart.h>
 #include <stdarg.h>
 #include <stdio.h>
-#include <zephyr.h>
+
+#include "nat_test.h"
 
 #define UDP_PORT 3050
 #define TCP_PORT 3051
-#define THREAD_PRIORITY 5
 #define THREAD_STACK_SIZE 8192
 #define S_TO_MS_MULT 1000
-#define POLL_TIMEOUT_S 3
+#define WAIT_TIME_S 3
 #define WAIT_LOG_THRESHOLD_MS (60 * S_TO_MS_MULT)
 #define TIMEOUT_TOL_S 10
-#define MAX_RECONNECT_ATTEMPTS 5
-#define CONNECTION_TIMEOUT_M CONFIG_LTE_NETWORK_TIMEOUT
 #define DEFAULT_UDP_INITIAL_TIMEOUT 1
 #define DEFAULT_TCP_INITIAL_TIMEOUT 300
 #define DEFAULT_UDP_TIMEOUT_MULTIPLIER 2
 #define DEFAULT_TCP_TIMEOUT_MULTIPLIER 1.5
-#define DEFAULT_CONNECTION_MODE LTE_LC_SYSTEM_MODE_LTEM
-#define DEFAULT_CONNECTION_STATE LTE_LC_NW_REG_NOT_REGISTERED
-#define BUF_SIZE 512
 #define IP_STRINGS_COUNT 10
-
-enum test_state {
-    UNINITIALIZED,
-    IDLE,
-    RUNNING,
-    ABORT
-};
-
-struct connection {
-    atomic_t mode;  // lte_lc_system_mode
-    atomic_t state; // lte_lc_nw_reg_status
-} connection;
 
 struct test_thread_timeout {
     int timeout;
@@ -60,7 +39,6 @@ struct test_thread_data {
     atomic_t type;
     atomic_t state;
     struct k_sem sem;
-    const struct shell *shell;
     struct test_thread_timeout timeout_data;
 };
 
@@ -71,9 +49,7 @@ struct test_thread {
     struct test_thread_data thread_data;
 };
 
-K_SEM_DEFINE(lte_connected, 0, 1);
-
-K_THREAD_STACK_DEFINE(thread_stack_area, THREAD_STACK_SIZE);
+K_THREAD_STACK_DEFINE(nat_test_thread_stack_area, THREAD_STACK_SIZE);
 
 static struct test_thread test_thread;
 
@@ -82,93 +58,9 @@ volatile int tcp_initial_timeout;
 volatile float udp_timeout_multiplier;
 volatile float tcp_timeout_multiplier;
 
-int get_initial_timeout(enum test_type type)
+int get_test_state(void)
 {
-    if (type == TEST_UDP) {
-        return udp_initial_timeout;
-    } else if (type == TEST_TCP) {
-        return tcp_initial_timeout;
-    }
-
-    return 0;
-}
-
-void set_initial_timeout(enum test_type type, int value)
-{
-    if (type == TEST_UDP) {
-        udp_initial_timeout = value;
-    } else if (type == TEST_TCP) {
-        tcp_initial_timeout = value;
-    }
-}
-
-float get_timeout_multiplier(enum test_type type)
-{
-    if (type == TEST_UDP) {
-        return udp_timeout_multiplier;
-    } else if (type == TEST_TCP) {
-        return tcp_timeout_multiplier;
-    }
-
-    return 0;
-}
-
-void set_timeout_multiplier(enum test_type type, float value)
-{
-    if (type == TEST_UDP) {
-        udp_timeout_multiplier = value;
-    } else if (type == TEST_TCP) {
-        tcp_timeout_multiplier = value;
-    }
-}
-
-int get_network_mode()
-{
-    return atomic_get(&connection.state);
-}
-
-int set_network_mode(int mode)
-{
-    if (mode != LTE_LC_SYSTEM_MODE_LTEM && mode != LTE_LC_SYSTEM_MODE_NBIOT) {
-        return -INVALID_MODE;
-    } else if (atomic_get(&test_thread.thread_data.state) != IDLE) {
-        return -TEST_RUNNING;
-    } else if (atomic_get(&connection.mode) == mode) {
-        return 0;
-    }
-
-    atomic_set(&connection.mode, mode);
-
-    lte_lc_offline();
-    lte_lc_system_mode_set(mode);
-    lte_lc_normal();
-
-    while (atomic_get(&connection.state) == LTE_LC_NW_REG_NOT_REGISTERED) {
-        k_sleep(K_SECONDS(POLL_TIMEOUT_S));
-    }
-
-    return 0;
-}
-
-int get_network_state()
-{
-    return atomic_get(&connection.mode);
-}
-
-static void shell_check_and_print(const struct shell *shell, const char *fmt, ...)
-{
-    va_list args;
-    char msg[BUF_SIZE];
-
-    va_start(args, fmt);
-    vsnprintf(msg, BUF_SIZE, fmt, args);
-    va_end(args);
-
-    if (shell == NULL) {
-        printk("%s", msg);
-    } else {
-        shell_print(shell, "%s", msg);
-    }
+    return atomic_get(&test_thread.thread_data.state);
 }
 
 static int json_add_obj(cJSON *parent, const char *str, cJSON *item)
@@ -202,7 +94,7 @@ static int json_add_number(cJSON *parent, const char *str, double item)
     return json_add_obj(parent, str, json_num);
 }
 
-static int create_send_buffer(const struct shell *shell, struct modem_param_info *modem_params, char *buffer, int timeout_s)
+static int create_send_buffer(struct modem_param_info *modem_params, char *buffer, int timeout_s)
 {
     int ret = 0;
     cJSON *root_obj = cJSON_CreateObject();
@@ -212,14 +104,14 @@ static int create_send_buffer(const struct shell *shell, struct modem_param_info
     int ip_count = 0;
 
     if (root_obj == NULL) {
-        shell_check_and_print(shell, "Failed to create json root object\n");
+        printk("Failed to create json root object\n");
         return -ENOMEM;
     }
 
     char *token = strtok(modem_params->network.ip_address.value_string, delim);
     while (token != NULL) {
         if (ip_count >= ARRAY_SIZE(ip_strings)) {
-            shell_check_and_print(shell, "More than %d adresses found. Remainder will not be added to json\n", IP_STRINGS_COUNT);
+            printk("More than %d adresses found. Remainder will not be added to json\n", IP_STRINGS_COUNT);
             break;
         }
         ip_strings[ip_count] = token;
@@ -229,7 +121,7 @@ static int create_send_buffer(const struct shell *shell, struct modem_param_info
 
     ip_obj = cJSON_CreateStringArray(ip_strings, ip_count);
     if (ip_obj == NULL) {
-        shell_check_and_print(shell, "Failed to create json ip object\n");
+        printk("Failed to create json ip object\n");
         return -ENOMEM;
     }
 
@@ -244,14 +136,14 @@ static int create_send_buffer(const struct shell *shell, struct modem_param_info
     ret += json_add_number(root_obj, "interval", timeout_s);
 
     if (ret) {
-        shell_check_and_print(shell, "Failed to add json value\n");
+        printk("Failed to add json value\n");
         ret = -ENOMEM;
         goto exit;
     }
 
     char *root_obj_string = cJSON_Print(root_obj);
     if (root_obj_string == NULL) {
-        shell_check_and_print(shell, "Failed to print json object\n");
+        printk("Failed to print json object\n");
         ret = -1;
         goto exit;
     }
@@ -266,7 +158,7 @@ exit:
     return ret;
 }
 
-static int send_data(int client_fd, int timeout_s, const struct shell *shell)
+static int send_data(int client_fd, int timeout_s)
 {
     int err;
     char send_buf[BUF_SIZE] = {0};
@@ -275,35 +167,35 @@ static int send_data(int client_fd, int timeout_s, const struct shell *shell)
 
     err = modem_info_params_init(&modem_params);
     if (err) {
-        shell_check_and_print(shell, "Modem info params could not be initialised: %d\n", err);
+        printk("Modem info params could not be initialised: %d\n", err);
         return -1;
     }
 
     err = modem_info_params_get(&modem_params);
     if (err < 0) {
-        shell_check_and_print(shell, "Unable to obtain modem parameters: %d\n", err);
-        return -1;
+        printk("Unable to obtain modem parameters: %d\n", err);
+        return -ENOTCONN;
     }
 
-    send_len = create_send_buffer(shell, &modem_params, send_buf, timeout_s);
+    send_len = create_send_buffer(&modem_params, send_buf, timeout_s);
     if (send_len < 0) {
-        shell_check_and_print(shell, "Error creating json object\n");
+        printk("Error creating json object\n");
         return -1;
     }
 
     /* send len + 1 for null terminated packet */
     err = send(client_fd, send_buf, send_len + 1, 0);
     if (err < 0) {
-        shell_check_and_print(shell, "Failed to send data, errno: %d\n", errno);
+        printk("Failed to send data, errno: %d\n", errno);
 
         return -ENOTCONN;
     }
 
-    shell_check_and_print(shell, "Packet sent: %s\n", send_buf);
+    printk("Packet sent: %s\n", send_buf);
     return 0;
 }
 
-static int poll_and_read(int client_fd, int timeout_s, const struct shell *shell, atomic_t *state)
+static int poll_and_read(int client_fd, int timeout_s, atomic_t *state)
 {
     int err;
     char recv_buf[BUF_SIZE] = {0};
@@ -314,29 +206,29 @@ static int poll_and_read(int client_fd, int timeout_s, const struct shell *shell
     s64_t total_poll_time_ms = 0;
 
     while (1) {
-        err = poll(fds, ARRAY_SIZE(fds), POLL_TIMEOUT_S * S_TO_MS_MULT);
-        if (err < 0) {
-            shell_check_and_print(shell, "poll, error: %d", err);
-
+        if (atomic_get(state) == ABORT) {
             return -1;
-        } else if (err == 0) {
-            if (atomic_get(state) == ABORT) {
-                return 0;
-            }
+        }
 
+        err = poll(fds, ARRAY_SIZE(fds), WAIT_TIME_S * S_TO_MS_MULT);
+        if (err < 0) {
+            printk("poll, error: %d", err);
+
+            return -ENOTCONN;
+        } else if (err == 0) {
             int delta = k_uptime_delta(&start_time_ms);
             per_log_poll_time_ms += delta;
             total_poll_time_ms += delta;
             if (total_poll_time_ms <= (timeout_s + TIMEOUT_TOL_S) * S_TO_MS_MULT) {
                 if (per_log_poll_time_ms >= WAIT_LOG_THRESHOLD_MS) {
-                    shell_check_and_print(shell, "Elapsed time: %d of %d seconds (%d seconds tolerance)\n", total_poll_time_ms / S_TO_MS_MULT, timeout_s + TIMEOUT_TOL_S, TIMEOUT_TOL_S);
+                    printk("Elapsed time: %d of %d seconds (%d seconds tolerance)\n", (int)(total_poll_time_ms / S_TO_MS_MULT), timeout_s + TIMEOUT_TOL_S, TIMEOUT_TOL_S);
                     per_log_poll_time_ms = 0;
                 }
 
                 continue;
             }
 
-            shell_check_and_print(shell, "No response from server\n");
+            printk("No response from server\n");
             return 0;
         } else if ((fds[0].revents & POLLIN) == POLLIN) {
             ret_len = recv(client_fd, recv_buf, sizeof(recv_buf) - 1, 0);
@@ -344,98 +236,56 @@ static int poll_and_read(int client_fd, int timeout_s, const struct shell *shell
                 recv_buf[ret_len] = 0;
 
                 if (strstr(recv_buf, "error") != NULL || strstr(recv_buf, "Error") != NULL) {
-                    shell_check_and_print(shell, "Response: %s\n", recv_buf);
+                    printk("Response: %s\n", recv_buf);
                     return -1;
                 }
 
-                shell_check_and_print(shell, "Response: %s\n", recv_buf);
+                printk("Response: %s\n", recv_buf);
                 return 1;
             }
         }
     }
 }
 
-static void lte_handler(const struct lte_lc_evt *const evt)
-{
-    static bool init_connect = true;
-    switch (evt->type) {
-    case LTE_LC_EVT_NW_REG_STATUS:
-        if (init_connect) {
-            if ((evt->nw_reg_status == LTE_LC_NW_REG_REGISTERED_HOME) || (evt->nw_reg_status == LTE_LC_NW_REG_REGISTERED_ROAMING)) {
-                k_sem_give(&lte_connected);
-                init_connect = false;
-            }
-        }
-        atomic_set(&connection.state, evt->nw_reg_status);
-        break;
-    default:
-        break;
-    }
-}
-
-static int lte_connection_check(const struct shell *shell, atomic_t *state)
-{
-    enum lte_lc_nw_reg_status nw_reg_status = atomic_get(&connection.state);
-    s64_t start_time_ms = k_uptime_get();
-    s64_t reconnect_attempt_time_ms = 0;
-    int log_counter = 0;
-    int attempt_counter = 0;
-
-    if ((nw_reg_status != LTE_LC_NW_REG_REGISTERED_HOME) && (nw_reg_status != LTE_LC_NW_REG_REGISTERED_ROAMING)) {
-        shell_check_and_print(shell, "LTE link not maintained.\nAttempting to reconnect, attempt (%d/%d)...\n", i + 1, MAX_RECONNECT_ATTEMPTS);
-    }
-
-    while (attempt_counter < MAX_RECONNECT_ATTEMPTS) {
-        if (atomic_get(state) == ABORT) {
-            return -1;
-        }
-        nw_reg_status = atomic_get(&connection.state);
-
-        if ((nw_reg_status != LTE_LC_NW_REG_REGISTERED_HOME) && (nw_reg_status != LTE_LC_NW_REG_REGISTERED_ROAMING)) {
-            if ((nw_reg_status == LTE_LC_NW_REG_NOT_REGISTERED) || (nw_reg_status == LTE_LC_NW_REG_REGISTRATION_DENIED)) {
-                attempt_counter++;
-                lte_lc_offline();
-                lte_lc_system_mode_set(atomic_get(&connection.mode));
-                lte_lc_normal();
-                shell_check_and_print(shell, "LTE link not maintained.\nAttempting to reconnect, attempt: (%d/%d)...\n", attempt_counter + 1, MAX_RECONNECT_ATTEMPTS);
-            }
-        } else {
-            return 0;
-        }
-        k_sleep(K_SECONDS(POLL_TIMEOUT_S));
-        reconnect_attempt_time_ms += k_uptime_delta(&start_time_ms);
-
-        if (reconnect_attempt_time_ms >= WAIT_LOG_THRESHOLD_MS) {
-            log_counter++;
-            shell_check_and_print(shell, "Elapsed time/network timeout: %d/%d seconds\n", (reconnect_attempt_time_ms / S_TO_MS_MULT) * log_counter, CONNECTION_TIMEOUT_M);
-            reconnect_attempt_time_ms = 0;
-        }
-    }
-    shell_check_and_print(shell, "LTE link could not be established.\n");
-    return -1;
-}
-
-static int setup_connection(int *client_fd, enum test_type type, const struct shell *shell, atomic_t *state)
+static int setup_connection(int *client_fd, enum test_type type, int port, atomic_t *state)
 {
     int err;
     struct addrinfo *res;
     struct addrinfo hints = {
         .ai_family = AF_INET,
     };
+    enum lte_lc_nw_reg_status network_state = get_network_state();
+    s64_t start_time = k_uptime_get();
+    s64_t wait_time = 0;
 
-    err = lte_connection_check(shell, state);
-    if (err < 0) {
-#if defined(CONFIG_LTE_RESET_WHEN_UNABLE_TO_RECONNECT)
-        shell_check_and_print(shell, "LTE link could not be established.\nResetting...\n");
-        sys_reboot(SYS_REBOOT_WARM);
-#endif
-        return -1;
+    /* Trigger a connect attempt only when device is able exhaust its reconnect attempts without restarting */
+    if (!IS_ENABLED(CONFIG_NAT_TEST_RESET_WHEN_UNABLE_TO_CONNECT)) {
+        if ((network_state != LTE_LC_NW_REG_REGISTERED_HOME) &&
+            (network_state != LTE_LC_NW_REG_REGISTERED_ROAMING) &&
+            (network_state != LTE_LC_NW_REG_SEARCHING)) {
+            lte_lc_offline();
+        }
+    }
+
+    while ((network_state != LTE_LC_NW_REG_REGISTERED_HOME) && (network_state != LTE_LC_NW_REG_REGISTERED_ROAMING)) {
+        k_sleep(WAIT_TIME_S);
+        if (atomic_get(state) == ABORT) {
+            return -1;
+        }
+
+        wait_time += k_uptime_delta(&start_time);
+        /* Give enough time for an entire lte connect attempt */
+        if (wait_time >= CONFIG_LTE_NETWORK_TIMEOUT) {
+            printk("Unable to connect. No LTE link was established in time\nTry again later.\n");
+            return -1;
+        }
+        network_state = get_network_state();
     }
 
     if (type == TEST_UDP) {
         *client_fd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
         if (client_fd <= 0) {
-            shell_check_and_print(shell, "socket() failed, errno: %d\n", errno);
+            printk("socket() failed, errno: %d\n", errno);
             return -1;
         }
 
@@ -443,7 +293,7 @@ static int setup_connection(int *client_fd, enum test_type type, const struct sh
     } else if (type == TEST_TCP) {
         *client_fd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
         if (client_fd <= 0) {
-            shell_check_and_print(shell, "socket() failed, errno: %d\n", errno);
+            printk("socket() failed, errno: %d\n", errno);
             return -2;
         }
 
@@ -454,23 +304,19 @@ static int setup_connection(int *client_fd, enum test_type type, const struct sh
 
     err = getaddrinfo(SERVER_HOSTNAME, NULL, &hints, &res);
     if (err) {
-        shell_check_and_print(shell, "getaddrinfo() failed, err %d\n", errno);
+        printk("getaddrinfo() failed, err %d\n", errno);
         return -1;
     }
 
-    if (type == TEST_UDP) {
-        ((struct sockaddr_in *)res->ai_addr)->sin_port = htons(UDP_PORT);
-    } else if (type == TEST_TCP) {
-        ((struct sockaddr_in *)res->ai_addr)->sin_port = htons(TCP_PORT);
-    }
+    ((struct sockaddr_in *)res->ai_addr)->sin_port = htons(port);
 
     err = connect(*client_fd, res->ai_addr, sizeof(struct sockaddr_in));
     if (err) {
-        shell_check_and_print(shell, "connect failed, errno: %d\n\r", errno);
+        printk("connect failed, errno: %d\n\r", errno);
         return -1;
     }
 
-    shell_check_and_print(shell, "Connected to server\n");
+    printk("Connected to server\n");
 
     return 0;
 }
@@ -493,7 +339,7 @@ static bool get_timeout_binary_search(struct test_thread_timeout *timeout_data, 
     }
 }
 
-static void init_values(struct test_thread_timeout *timeout_data, enum test_type type)
+static void init_values(struct test_thread_timeout *timeout_data, enum test_type type, int *port)
 {
     timeout_data->lower = 0;
     timeout_data->upper = 0;
@@ -502,10 +348,12 @@ static void init_values(struct test_thread_timeout *timeout_data, enum test_type
     case TEST_UDP:
         timeout_data->timeout = udp_initial_timeout;
         timeout_data->multiplier = udp_timeout_multiplier;
+        *port = UDP_PORT;
         break;
     case TEST_TCP:
         timeout_data->timeout = tcp_initial_timeout;
         timeout_data->multiplier = tcp_timeout_multiplier;
+        *port = TCP_PORT;
         break;
     default:
         /* Unused */
@@ -517,16 +365,17 @@ static void init_values(struct test_thread_timeout *timeout_data, enum test_type
  * @brief Run single test case (UDP or TCP). Send data with increasing timeout interval until no answer is received (connection closed due to timeout). 
  *        Then use binary search to determine accurate timeout.
  */
-static void nat_test_run_single(enum test_type type, const struct shell *shell, struct test_thread_timeout *timeout_data, atomic_t *state)
+static void nat_test_run_single(enum test_type type, struct test_thread_timeout *timeout_data, atomic_t *state)
 {
     int err;
     int client_fd;
     bool finished = false;
     bool using_binary_search = false;
+    int port = 0;
 
-    init_values(timeout_data, type);
+    init_values(timeout_data, type, &port);
 
-    err = setup_connection(&client_fd, type, shell, state);
+    err = setup_connection(&client_fd, type, port, state);
     if (err < 0) {
         return;
     }
@@ -536,20 +385,24 @@ static void nat_test_run_single(enum test_type type, const struct shell *shell, 
             goto abort;
         }
 
-        err = send_data(client_fd, timeout_data->timeout, shell);
+        err = send_data(client_fd, timeout_data->timeout);
         if (err < 0) {
-            if (err == ENOTCONN) {
+            if (err == -ENOTCONN) {
                 goto reconnect;
             }
             goto abort;
         }
 
-        err = poll_and_read(client_fd, timeout_data->timeout, shell, state);
+        err = poll_and_read(client_fd, timeout_data->timeout, state);
         if (err < 0) {
-            goto reconnect;
+            if (err == -ENOTCONN) {
+                goto reconnect;
+            }
+            goto abort;
         } else if (err == 0) {
             using_binary_search = true;
             finished = get_timeout_binary_search(timeout_data, true);
+            goto reconnect;
         } else if (err > 0 && using_binary_search) {
             finished = get_timeout_binary_search(timeout_data, false);
         }
@@ -564,15 +417,13 @@ static void nat_test_run_single(enum test_type type, const struct shell *shell, 
     reconnect:
         close(client_fd);
 
-        err = setup_connection(&client_fd, type, shell, state);
+        err = setup_connection(&client_fd, type, port, state);
         if (err < 0) {
             return;
         }
     }
 
-    shell_check_and_print(shell, "Finished NAT timeout measurements\nMax keep-alive time: %d seconds\n", timeout_data->timeout);
-    (void)close(client_fd);
-    return;
+    printk("Finished NAT timeout measurements\nMax keep-alive time: %d seconds\n", timeout_data->timeout);
 
 abort:
     (void)close(client_fd);
@@ -580,14 +431,14 @@ abort:
 
 static void nat_test_run_both(struct test_thread_data *thread_data)
 {
-    nat_test_run_single(TEST_UDP, thread_data->shell, &thread_data->timeout_data, &thread_data->state);
+    nat_test_run_single(TEST_UDP, &thread_data->timeout_data, &thread_data->state);
 
     if (atomic_get(&thread_data->state) != ABORT) {
-        nat_test_run_single(TEST_TCP, thread_data->shell, &thread_data->timeout_data, &thread_data->state);
+        nat_test_run_single(TEST_TCP, &thread_data->timeout_data, &thread_data->state);
     }
 }
 
-int nat_test_start(enum test_type type, const struct shell *shell)
+int nat_test_start(enum test_type type)
 {
     switch (atomic_get(&test_thread.thread_data.state)) {
     case RUNNING:
@@ -599,7 +450,6 @@ int nat_test_start(enum test_type type, const struct shell *shell)
     }
 
     atomic_set(&test_thread.thread_data.type, type);
-    test_thread.thread_data.shell = shell;
     k_sem_give(&test_thread.thread_data.sem);
 
     return 0;
@@ -612,7 +462,7 @@ int nat_test_stop(void)
         atomic_set(&test_thread.thread_data.state, ABORT);
     case ABORT:
         /* Make sure thread has enough time to detect abort request */
-        k_sleep(K_SECONDS(POLL_TIMEOUT_S * 2));
+        k_sleep(K_SECONDS(WAIT_TIME_S * 2));
         if (atomic_get(&test_thread.thread_data.state) != IDLE) {
             return -1;
         }
@@ -636,73 +486,40 @@ static void nat_test_thread_entry_point(void *param, void *unused, void *unused2
 
         atomic_set(&thread_data->state, RUNNING);
 
-        shell_check_and_print(thread_data->shell, "Test started\n");
+        printk("Test started\n");
         switch (atomic_get(&thread_data->type)) {
         case TEST_UDP:
         case TEST_TCP:
-            nat_test_run_single(thread_data->type, thread_data->shell, &thread_data->timeout_data, &thread_data->state);
+            nat_test_run_single(thread_data->type, &thread_data->timeout_data, &thread_data->state);
             break;
         case TEST_UDP_AND_TCP:
             nat_test_run_both(thread_data);
             break;
         default:
-            shell_check_and_print(thread_data->shell, "Thread with invalid type started");
+            printk("Thread with invalid type started");
             return;
         }
         atomic_set(&thread_data->state, IDLE);
+        printk("Test idle\n");
     }
 }
 
 static void prepare_and_start_thread(struct test_thread *thread)
 {
     k_sem_init(&thread->thread_data.sem, 0, 1);
-    thread->stack_area = thread_stack_area;
+    thread->stack_area = nat_test_thread_stack_area;
 
-    thread->tid = k_thread_create(
-        &thread->thread, thread->stack_area, THREAD_STACK_SIZE,
-        nat_test_thread_entry_point, (void *)&thread->thread_data,
-        NULL, NULL, THREAD_PRIORITY, 0, K_NO_WAIT);
+    thread->tid = k_thread_create(&thread->thread, thread->stack_area, THREAD_STACK_SIZE,
+                                  nat_test_thread_entry_point, (void *)&thread->thread_data,
+                                  NULL, NULL, THREAD_PRIORITY, 0, K_NO_WAIT);
 }
 
-int nat_test_init()
+void nat_test_init()
 {
-    int err;
-
-    printk("NAT-test client started\n");
-    printk("Version: %s\n", CONFIG_NAT_TEST_VERSION);
-
     udp_initial_timeout = DEFAULT_UDP_INITIAL_TIMEOUT;
     tcp_initial_timeout = DEFAULT_TCP_INITIAL_TIMEOUT;
     udp_timeout_multiplier = DEFAULT_UDP_TIMEOUT_MULTIPLIER;
     tcp_timeout_multiplier = DEFAULT_TCP_TIMEOUT_MULTIPLIER;
 
-    atomic_set(&connection.mode, DEFAULT_CONNECTION_MODE);
-    atomic_set(&connection.state, DEFAULT_CONNECTION_STATE);
-
-    cJSON_Init();
-
-    err = modem_info_init();
-    if (err) {
-        printk("Modem info could not be initialised: %d\n", err);
-        return -1;
-    }
-
     prepare_and_start_thread(&test_thread);
-
-    printk("Setting up LTE connection\n");
-
-    err = lte_lc_init_and_connect_async(lte_handler);
-    if (err) {
-        printk("LTE link could not be established, error: %d\n", err);
-        return -1;
-    }
-
-    if (k_sem_take(&lte_connected, K_MINUTES(CONNECTION_TIMEOUT_M)) != 0) {
-        printk("LTE link could not be established\n");
-        return -1;
-    }
-
-    printk("LTE connected\n");
-
-    return 0;
 }

@@ -11,11 +11,19 @@
 
 #define SERVER_HOSTNAME "nat-test.thingy.rocks"
 #define BUF_SIZE 512
+#define THREAD_PRIORITY 5
 
 enum test_type {
     TEST_UDP = 0,
     TEST_TCP = 1,
     TEST_UDP_AND_TCP = 2
+};
+
+enum test_state {
+    UNINITIALIZED,
+    IDLE,
+    RUNNING,
+    ABORT
 };
 
 enum set_network_mode_error {
@@ -24,40 +32,20 @@ enum set_network_mode_error {
     TEST_RUNNING = 2
 };
 
-/**
- * @brief Function to get initial timeout
- * 
- * @param type Test type
- */
-int get_initial_timeout(enum test_type type);
+extern volatile int udp_initial_timeout;
+extern volatile int tcp_initial_timeout;
+extern volatile float udp_timeout_multiplier;
+extern volatile float tcp_timeout_multiplier;
 
 /**
- * @brief Function set initial timeout
- * 
- * @param type Test type
- * @param value New value timeout
+ * @brief Function to get current test state
  */
-void set_initial_timeout(enum test_type type, int value);
-
-/**
- * @brief Function to get timeout multiplier
- * 
- * @param type Test type
- */
-float get_timeout_multiplier(enum test_type type);
-
-/**
- * @brief Function to set timeout multiplier
- * 
- * @param type Test type
- * @param value New timeout multiplier value
- */
-void set_timeout_multiplier(enum test_type type, float value);
+int get_test_state(void);
 
 /**
  * @brief Function to get network mode
  */
-int get_network_mode();
+int get_network_mode(void);
 
 /**
  * @brief Function to set network mode
@@ -69,7 +57,7 @@ int set_network_mode(int mode);
 /**
  * @brief Function to get network state
  */
-int get_network_state();
+int get_network_state(void);
 
 /**
  * @brief Function to stop running test
@@ -80,13 +68,17 @@ int nat_test_stop(void);
  * @brief Function to start test
  * 
  * @param type Test type
- * @param shell Pointer to active shell
  */
-int nat_test_start(enum test_type type, const struct shell *shell);
+int nat_test_start(enum test_type type);
 
 /**
  * @brief Function for initializing the NAT-test client.
  */
-int nat_test_init(void);
+void nat_test_init(void);
+
+/**
+ * @brief Function for initializing the NAT-cmd module.
+ */
+void nat_cmd_init(void);
 
 #endif /* NAT_TEST_H_ */
