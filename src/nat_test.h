@@ -55,9 +55,9 @@ int get_network_mode(void);
 int set_network_mode(int mode);
 
 /**
- * @brief Function to get network state
+ * @brief Function to get network status
  */
-int get_network_state(void);
+int get_network_status(void);
 
 /**
  * @brief Function to stop running test
