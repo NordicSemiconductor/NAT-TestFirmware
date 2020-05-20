@@ -138,16 +138,32 @@ static void handle_get_multiplier(const struct shell *shell, size_t argc, char *
 
 static void handle_start_test(const struct shell *shell, size_t argc, char **argv)
 {
-    int err = -1;
-
+    int err;
+    enum test_type type;
     if (!strcmp(argv[0], "udp")) {
-        err = nat_test_start(TEST_UDP);
+        type = TEST_UDP;
     } else if (!strcmp(argv[0], "tcp")) {
-        err = nat_test_start(TEST_TCP);
+        type = TEST_TCP;
     } else if (!strcmp(argv[0], "udp_and_tcp")) {
-        err = nat_test_start(TEST_UDP_AND_TCP);
+        type = TEST_UDP_AND_TCP;
+    } else {
+        shell_print(shell, "Invalid test type\n");
+        return;
     }
 
+    err = lte_lc_psm_req(false);
+    if (err < 0) {
+        shell_print(shell, "Failed to disable Power Saving mode.\nRequest to start test denied.\n");
+        return;
+    }
+
+    err = lte_lc_edrx_req(false);
+    if (err < 0) {
+        shell_print(shell, "Failed to disable use of eDRX.\nRequest to start test denied.\n");
+        return;
+    }
+
+    err = nat_test_start(type);
     if (err < 0) {
         shell_print(shell, "Another test is still active\n");
         return;
