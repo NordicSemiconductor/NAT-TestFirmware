@@ -254,20 +254,20 @@ static int setup_connection(int *client_fd, enum test_type type, int port, atomi
     struct addrinfo hints = {
         .ai_family = AF_INET,
     };
-    enum lte_lc_nw_reg_status network_state = get_network_state();
+    enum lte_lc_nw_reg_status network_status = get_network_status();
     s64_t start_time = k_uptime_get();
     s64_t wait_time = 0;
 
     /* Trigger a connect attempt only when device is able exhaust its reconnect attempts without restarting */
     if (!IS_ENABLED(CONFIG_NAT_TEST_RESET_WHEN_UNABLE_TO_CONNECT)) {
-        if ((network_state != LTE_LC_NW_REG_REGISTERED_HOME) &&
-            (network_state != LTE_LC_NW_REG_REGISTERED_ROAMING) &&
-            (network_state != LTE_LC_NW_REG_SEARCHING)) {
+        if ((network_status != LTE_LC_NW_REG_REGISTERED_HOME) &&
+            (network_status != LTE_LC_NW_REG_REGISTERED_ROAMING) &&
+            (network_status != LTE_LC_NW_REG_SEARCHING)) {
             lte_lc_offline();
         }
     }
 
-    while ((network_state != LTE_LC_NW_REG_REGISTERED_HOME) && (network_state != LTE_LC_NW_REG_REGISTERED_ROAMING)) {
+    while ((network_status != LTE_LC_NW_REG_REGISTERED_HOME) && (network_status != LTE_LC_NW_REG_REGISTERED_ROAMING)) {
         k_sleep(WAIT_TIME_S);
         if (atomic_get(state) == ABORT) {
             return -1;
@@ -279,7 +279,7 @@ static int setup_connection(int *client_fd, enum test_type type, int port, atomi
             printk("Unable to connect. No LTE link was established in time\nTry again later.\n");
             return -1;
         }
-        network_state = get_network_state();
+        network_status = get_network_status();
     }
 
     if (type == TEST_UDP) {

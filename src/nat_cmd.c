@@ -183,9 +183,9 @@ static void handle_set_network_mode(const struct shell *shell, size_t argc, char
     shell_print(shell, "Changed network mode to %d\n", value);
 }
 
-static void handle_get_network_state(const struct shell *shell, size_t argc, char **argv)
+static void handle_get_network_status(const struct shell *shell, size_t argc, char **argv)
 {
-    shell_print(shell, "Network connection state: %d\n", get_network_state());
+    shell_print(shell, "Network connection status: %d\n", get_network_status());
 }
 
 SHELL_STATIC_SUBCMD_SET_CREATE(network_mode_accessor_cmds,
@@ -193,8 +193,8 @@ SHELL_STATIC_SUBCMD_SET_CREATE(network_mode_accessor_cmds,
                                SHELL_CMD(get, NULL, "Get network mode", handle_get_network_mode),
                                SHELL_SUBCMD_SET_END);
 SHELL_STATIC_SUBCMD_SET_CREATE(network_conf_cmds,
-                               SHELL_CMD(mode, &network_mode_accessor_cmds, "Configure netowkr mode", NULL),
-                               SHELL_CMD(state, NULL, "Get network state", handle_get_network_state),
+                               SHELL_CMD(mode, &network_mode_accessor_cmds, "Configure network mode", NULL),
+                               SHELL_CMD(status, NULL, "Get network status", handle_get_network_status),
                                SHELL_SUBCMD_SET_END);
 
 SHELL_STATIC_SUBCMD_SET_CREATE(test_timeout_accessor_cmds,
@@ -331,13 +331,13 @@ static int setup_connection(int *client_fd)
         .ai_family = AF_INET,
     };
 
-    int network_state = get_network_state();
-    while ((network_state != LTE_LC_NW_REG_REGISTERED_HOME) && (network_state != LTE_LC_NW_REG_REGISTERED_ROAMING)) {
-        network_state = get_network_state();
+    int network_status = get_network_status();
+    while ((network_status != LTE_LC_NW_REG_REGISTERED_HOME) && (network_status != LTE_LC_NW_REG_REGISTERED_ROAMING)) {
+        network_status = get_network_status();
 
         /* Trigger a connect attempt only when device can exhaust its reconnect attempts without restarting */
         if (!IS_ENABLED(CONFIG_NAT_TEST_RESET_WHEN_UNABLE_TO_CONNECT)) {
-            if (network_state != LTE_LC_NW_REG_SEARCHING) {
+            if (network_status != LTE_LC_NW_REG_SEARCHING) {
                 lte_lc_offline();
                 lte_lc_system_mode_set(get_network_mode());
                 lte_lc_normal();

@@ -38,9 +38,9 @@ int set_network_mode(int mode)
     return 0;
 }
 
-int get_network_state(void)
+int get_network_status(void)
 {
-    return network_mode;
+    return network_status;
 }
 
 static void lte_handler(const struct lte_lc_evt *const evt)
