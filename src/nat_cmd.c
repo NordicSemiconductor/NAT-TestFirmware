@@ -21,6 +21,7 @@
 #define AT_CMD_SERVER_PORT 3060
 #define WAIT_TIME_S 3
 #define THREAD_STACK_SIZE 8192
+#define AT_LOG_TIMEOUT_S 20
 
 struct at_cmd_log {
     char *cmd;
@@ -339,7 +340,7 @@ static int send_data(int client_fd, struct at_cmd_log *item)
     return 0;
 }
 
-static int setup_connection(int *client_fd)
+static int setup_connection(int *client_fd, struct pollfd *fds)
 {
     int err;
     struct addrinfo *res;
@@ -384,16 +385,22 @@ static int setup_connection(int *client_fd)
         return -1;
     }
 
+    fds->fd = *client_fd;
+    fds->events = POLLIN;
+
     return 0;
 }
 
 static void thread_entry_point(void *param, void *unused, void *unused2)
 {
     struct k_queue *queue = (struct k_queue *)param;
+    struct pollfd fds = {0};
+    char recv_buf[BUF_SIZE];
     int client_fd = 0;
     int err;
+    int ret_len;
 
-    err = setup_connection(&client_fd);
+    err = setup_connection(&client_fd, &fds);
     if (err < 0) {
         goto reconnect;
     }
@@ -411,6 +418,31 @@ static void thread_entry_point(void *param, void *unused, void *unused2)
                 } else if (err < 0) {
                     return;
                 }
+
+                memset(recv_buf, 0, BUF_SIZE);
+
+                err = poll(&fds, 1, AT_LOG_TIMEOUT_S * S_TO_MS_MULT);
+                if (err < 0) {
+                    printk("poll, error: %d", err);
+                    goto reconnect;
+                } else if (err == 0) {
+                    printk("No response from server.\nAppending AT log back into queue.\n");
+                    k_queue_append(queue, (void *)item);
+                    goto reconnect;
+                } else if ((fds.revents & POLLIN) == POLLIN) {
+                    ret_len = recv(client_fd, recv_buf, sizeof(recv_buf) - 1, 0);
+                    if (ret_len > 0 && ret_len < BUF_SIZE) {
+                        recv_buf[ret_len] = 0;
+
+                        if (strstr(recv_buf, "error") != NULL || strstr(recv_buf, "Error") != NULL) {
+                            printk("Response: %s\nAppending AT log back into queue.\n", recv_buf);
+                            k_queue_append(queue, (void *)item);
+                            goto reconnect;
+                        }
+
+                        printk("Response: %s\n", recv_buf);
+                    }
+                }
             }
         }
 
@@ -421,7 +453,7 @@ static void thread_entry_point(void *param, void *unused, void *unused2)
     reconnect:
         (void)close(client_fd);
 
-        err = setup_connection(&client_fd);
+        err = setup_connection(&client_fd, &fds);
         if (err < 0) {
             k_sleep(K_SECONDS(WAIT_TIME_S));
 
