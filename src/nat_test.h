@@ -12,6 +12,7 @@
 #define SERVER_HOSTNAME "nat-test.thingy.rocks"
 #define BUF_SIZE 512
 #define THREAD_PRIORITY 5
+#define S_TO_MS_MULT 1000
 
 enum test_type {
     TEST_UDP = 0,
