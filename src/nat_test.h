@@ -38,6 +38,8 @@ extern volatile int tcp_initial_timeout;
 extern volatile float udp_timeout_multiplier;
 extern volatile float tcp_timeout_multiplier;
 
+extern struct k_sem getaddrinfo_sem;
+
 /**
  * @brief Function to get current test state
  */

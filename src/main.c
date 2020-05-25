@@ -16,6 +16,8 @@
 volatile enum lte_lc_nw_reg_status network_status;
 volatile enum lte_lc_system_mode network_mode;
 
+struct k_sem getaddrinfo_sem;
+
 int get_network_mode(void)
 {
     return network_mode;
@@ -108,6 +110,8 @@ void main(void)
     }
     printk("LTE connected\n");
 
+    k_sem_init(&getaddrinfo_sem, 0, 1);
+
     cJSON_Init();
 
     err = modem_info_init();
@@ -115,10 +119,9 @@ void main(void)
         printk("Modem info could not be initialised: %d\n", err);
         return;
     }
-
     nat_test_init();
+    nat_cmd_init();
+    k_sem_give(&getaddrinfo_sem);
 
     nat_test_start(TEST_UDP_AND_TCP);
-
-    nat_cmd_init();
 }

@@ -178,7 +178,6 @@ static int send_data(int client_fd, int timeout_s)
 
     send_len = create_send_buffer(&modem_params, send_buf, timeout_s);
     if (send_len < 0) {
-        printk("Error creating json object\n");
         return -1;
     }
 
@@ -301,11 +300,14 @@ static int setup_connection(int *client_fd, enum test_type type, int port, atomi
         return -1;
     }
 
+    k_sem_take(&getaddrinfo_sem, K_FOREVER);
     err = getaddrinfo(SERVER_HOSTNAME, NULL, &hints, &res);
     if (err) {
+        k_sem_give(&getaddrinfo_sem);
         printk("getaddrinfo() failed, err %d\n", errno);
         return -1;
     }
+    k_sem_give(&getaddrinfo_sem);
 
     ((struct sockaddr_in *)res->ai_addr)->sin_port = htons(port);
 
@@ -459,12 +461,8 @@ int nat_test_stop(void)
     switch (atomic_get(&test_thread.thread_data.state)) {
     case RUNNING:
         atomic_set(&test_thread.thread_data.state, ABORT);
+        break;
     case ABORT:
-        /* Make sure thread has enough time to detect abort request */
-        k_sleep(K_SECONDS(WAIT_TIME_S * 2));
-        if (atomic_get(&test_thread.thread_data.state) != IDLE) {
-            return -1;
-        }
         break;
     case IDLE:
     default:
@@ -513,7 +511,7 @@ static void prepare_and_start_thread(struct test_thread *thread)
                                   NULL, NULL, THREAD_PRIORITY, 0, K_NO_WAIT);
 }
 
-void nat_test_init()
+void nat_test_init(void)
 {
     udp_initial_timeout = DEFAULT_UDP_INITIAL_TIMEOUT;
     tcp_initial_timeout = DEFAULT_TCP_INITIAL_TIMEOUT;
