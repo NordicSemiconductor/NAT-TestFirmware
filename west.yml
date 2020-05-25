@@ -1,9 +1,9 @@
 manifest:
   remotes:
     - name: nordic
-      url-base: https://github.com/NordicPlayground
+      url-base: https://github.com/nrfconnect
   projects:
-    - name: fw-nrfconnect-nrf
+    - name: sdk-nrf
       path: nrf
       remote: nordic
       revision: a8a46cab54c402db76ba9c309636cfa52785b5ad
