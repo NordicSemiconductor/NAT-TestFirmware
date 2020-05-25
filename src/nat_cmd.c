@@ -22,13 +22,15 @@
 #define WAIT_TIME_S 3
 #define THREAD_STACK_SIZE 8192
 #define AT_LOG_TIMEOUT_S 20
+#define AT_BUF_SIZE 200
 
 struct at_cmd_log {
-    char *cmd;
-    char *res;
+    void *fifo_reserved;
+    char cmd[AT_BUF_SIZE];
+    char res[AT_BUF_SIZE];
 };
 
-K_QUEUE_DEFINE(at_cmd_queue);
+K_FIFO_DEFINE(at_cmd_fifo);
 
 K_THREAD_STACK_DEFINE(nat_cmd_thread_stack_area, THREAD_STACK_SIZE);
 struct k_thread thread;
@@ -54,9 +56,17 @@ static void handle_at_cmd(const struct shell *shell, size_t argc, char **argv)
     case AT_CMD_OK:
         shell_print(shell, "%s\n", response);
         shell_print(shell, "OK\n");
-        struct at_cmd_log item = {.cmd = argv[1],
-                                  .res = response};
-        k_queue_append(&at_cmd_queue, (void *)&item);
+        struct at_cmd_log *item;
+        item = k_malloc(sizeof(*item));
+
+        if (item == NULL) {
+            shell_print(shell, "Failed to allocate at_cmd_log item.\n");
+            break;
+        }
+        strcpy(item->cmd, argv[1]);
+        strcpy(item->res, response);
+
+        k_fifo_put(&at_cmd_fifo, (void *)item);
         break;
     case AT_CMD_ERROR:
         shell_print(shell, "ERROR\n");
@@ -324,7 +334,6 @@ static int send_data(int client_fd, struct at_cmd_log *item)
 
     send_len = create_send_buffer(&modem_params, item, send_buf);
     if (send_len < 0) {
-        printk("Error creating json object\n");
         return -1;
     }
 
@@ -346,6 +355,7 @@ static int setup_connection(int *client_fd, struct pollfd *fds)
     struct addrinfo *res;
     struct addrinfo hints = {
         .ai_family = AF_INET,
+        .ai_socktype = SOCK_STREAM,
     };
 
     int network_status = get_network_status();
@@ -363,19 +373,20 @@ static int setup_connection(int *client_fd, struct pollfd *fds)
         k_sleep(K_SECONDS(CONFIG_LTE_NETWORK_TIMEOUT / 3));
     }
 
-    *client_fd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+    *client_fd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
     if (client_fd <= 0) {
         printk("socket() failed, errno: %d\n", errno);
         return -1;
     }
 
-    hints.ai_socktype = SOCK_DGRAM;
-
+    k_sem_take(&getaddrinfo_sem, K_FOREVER);
     err = getaddrinfo(SERVER_HOSTNAME, NULL, &hints, &res);
     if (err) {
         printk("getaddrinfo() failed, err %d\n", errno);
+        k_sem_give(&getaddrinfo_sem);
         return -1;
     }
+    k_sem_give(&getaddrinfo_sem);
 
     ((struct sockaddr_in *)res->ai_addr)->sin_port = htons(AT_CMD_SERVER_PORT);
 
@@ -393,31 +404,42 @@ static int setup_connection(int *client_fd, struct pollfd *fds)
 
 static void thread_entry_point(void *param, void *unused, void *unused2)
 {
-    struct k_queue *queue = (struct k_queue *)param;
+    struct k_fifo *fifo = (struct k_fifo *)param;
     struct pollfd fds = {0};
     char recv_buf[BUF_SIZE];
     int client_fd = 0;
     int err;
     int ret_len;
+    bool connected;
 
     err = setup_connection(&client_fd, &fds);
     if (err < 0) {
-        goto reconnect;
+        connected = false;
+    } else {
+        connected = true;
     }
-
     while (true) {
-        while (!k_queue_is_empty(queue)) {
-            struct at_cmd_log *item = (struct at_cmd_log *)k_queue_get(queue, K_NO_WAIT);
+        while (!k_fifo_is_empty(fifo)) {
+            if (!connected) {
+                goto reconnect;
+            }
+
+            struct at_cmd_log *item = (struct at_cmd_log *)k_fifo_get(fifo, K_NO_WAIT);
 
             /* Should not ever be NULL */
-            if (item == NULL) {
+            if (item != NULL) {
+                printk("Item: %s, %s\n", item->cmd, item->res);
                 err = send_data(client_fd, item);
                 if (err == ENOTCONN) {
-                    k_queue_append(queue, (void *)item);
+                    k_fifo_put(fifo, (void *)item);
                     goto reconnect;
                 } else if (err < 0) {
+                    free(item);
+                    printk("Exiting AT command client thread.\n");
                     return;
                 }
+
+                free(item);
 
                 memset(recv_buf, 0, BUF_SIZE);
 
@@ -426,8 +448,8 @@ static void thread_entry_point(void *param, void *unused, void *unused2)
                     printk("poll, error: %d", err);
                     goto reconnect;
                 } else if (err == 0) {
-                    printk("No response from server.\nAppending AT log back into queue.\n");
-                    k_queue_append(queue, (void *)item);
+                    printk("No response from server.\nAppending AT log back into fifo.\n");
+                    k_fifo_put(fifo, (void *)item);
                     goto reconnect;
                 } else if ((fds.revents & POLLIN) == POLLIN) {
                     ret_len = recv(client_fd, recv_buf, sizeof(recv_buf) - 1, 0);
@@ -435,9 +457,8 @@ static void thread_entry_point(void *param, void *unused, void *unused2)
                         recv_buf[ret_len] = 0;
 
                         if (strstr(recv_buf, "error") != NULL || strstr(recv_buf, "Error") != NULL) {
-                            printk("Response: %s\nAppending AT log back into queue.\n", recv_buf);
-                            k_queue_append(queue, (void *)item);
-                            goto reconnect;
+                            printk("Response: %s\nExiting AT command client thread.\n", recv_buf);
+                            return;
                         }
 
                         printk("Response: %s\n", recv_buf);
@@ -453,20 +474,25 @@ static void thread_entry_point(void *param, void *unused, void *unused2)
     reconnect:
         (void)close(client_fd);
 
+        connected = false;
+
         err = setup_connection(&client_fd, &fds);
         if (err < 0) {
-            k_sleep(K_SECONDS(WAIT_TIME_S));
-
-            goto reconnect;
+            printk("Failed to reconnect to server.\nEmptying fifo.\n");
+            /* Empty queue */
+            while (!k_fifo_is_empty(fifo)) {
+                k_fifo_get(fifo, K_NO_WAIT);
+            }
+            continue;
         }
+
+        connected = true;
     }
 }
 
-void nat_cmd_init()
+void nat_cmd_init(void)
 {
-    k_queue_init(&at_cmd_queue);
-
     k_thread_create(&thread, nat_cmd_thread_stack_area, THREAD_STACK_SIZE,
-                    thread_entry_point, (void *)&at_cmd_queue,
+                    thread_entry_point, (void *)&at_cmd_fifo,
                     NULL, NULL, THREAD_PRIORITY, 0, K_NO_WAIT);
 }
