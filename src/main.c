@@ -10,6 +10,7 @@
 #include <modem/lte_lc.h>
 #include <modem/modem_info.h>
 #include <power/reboot.h>
+#include <dk_buttons_and_leds.h>
 
 #include "nat_test.h"
 
@@ -96,6 +97,58 @@ static void lte_handler(const struct lte_lc_evt *const evt)
 	}
 }
 
+static void indicate_status_with_led(void)
+{
+	int current_led = DK_LED1;
+	int next_led = DK_LED1;
+	bool on = false;
+
+	while (true) {
+		switch (get_test_state()) {
+		case UNINITIALIZED:
+		case IDLE:
+			current_led = next_led;
+
+			dk_set_led_off(DK_LED1);
+
+			switch (next_led) {
+			case DK_LED1:
+				next_led = DK_LED2;
+				break;
+			case DK_LED2:
+				next_led = DK_LED4;
+				break;
+			case DK_LED4:
+				next_led = DK_LED3;
+				break;
+			case DK_LED3:
+			default:
+				next_led = DK_LED1;
+				break;
+			}
+
+			dk_set_led_off(current_led);
+			dk_set_led_on(next_led);
+			break;
+		case RUNNING:
+		case ABORT:
+		default:
+			dk_set_led_off(next_led);
+
+			on = !on;
+
+			if (on) {
+				dk_set_led_on(DK_LED1);
+			} else {
+				dk_set_led_off(DK_LED1);
+			}
+			break;
+		}
+
+		k_sleep(K_SECONDS(1));
+	}
+}
+
 void main(void)
 {
 	int err;
@@ -123,6 +176,8 @@ void main(void)
 
 	printk("LTE connected\n");
 
+	dk_leds_init();
+
 	cJSON_Init();
 
 	err = modem_info_init();
@@ -137,4 +192,6 @@ void main(void)
 	if (err) {
 		printk("Test was already running.\n");
 	}
+
+	indicate_status_with_led();
 }
