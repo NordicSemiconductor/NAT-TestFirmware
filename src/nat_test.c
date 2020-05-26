@@ -93,7 +93,7 @@ static int json_add_number(cJSON *parent, const char *str, double item)
 	return json_add_obj(parent, str, json_num);
 }
 
-static int create_send_buffer(struct modem_param_info *modem_params,
+static int create_send_buffer(struct modem_param_info *const modem_params,
 			      char *buffer, int timeout_s)
 {
 	int ret = 0;
@@ -171,7 +171,7 @@ exit:
 }
 
 static int send_data(int client_fd, int timeout_s,
-		     struct modem_param_info const *const modem_params)
+		     struct modem_param_info *const modem_params)
 {
 	int err;
 	char send_buf[BUF_SIZE] = { 0 };
@@ -540,6 +540,7 @@ static void prepare_and_start_thread(struct test_thread *thread)
 {
 	k_sem_init(&thread->thread_data.sem, 0, 1);
 	thread->stack_area = nat_test_thread_stack_area;
+	atomic_set(&thread->thread_data.state, UNINITIALIZED);
 
 	thread->tid =
 		k_thread_create(&thread->thread, thread->stack_area,

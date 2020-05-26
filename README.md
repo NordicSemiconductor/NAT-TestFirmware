@@ -47,3 +47,9 @@ The NAT-test client can be configured through UART shell (115200 baudrate) with 
       - get
 
 Additionally one can send AT-cmds with `at <AT cmd>`
+
+## LED status indication
+
+Test running - LED 1 blinking
+
+Test idle - LED 1-4 light up in circular order (1-2-4-3-1...)
