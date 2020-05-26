@@ -1,0 +1,36 @@
+name: Check compliance
+
+on: pull_request
+
+env:
+  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+jobs:
+  checkpatch:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v1
+
+      - name: Clone ci tools
+        run: git clone https://github.com/zephyrproject-rtos/ci-tools ../ci-tools
+
+      - name: Install dependencies
+        run: |
+          python3 -m pip install --user pip setuptools urllib3 chardet
+          python3 -m pip install --user wheel pylint junitparser
+          python3 -m pip install --user -r ../ci-tools/requirements.txt
+          sudo apt-get install gitlint
+          sudo apt-get install httpie jq
+      - name: Check compliance
+        id: check-compliance
+        env:
+          BUILD_NUMBER: ${{ github.sha }}
+          GH_USERNAME: github-actions[bot]
+        run: |
+          curl -s https://raw.githubusercontent.com/nrfconnect/sdk-nrf/master/.checkpatch.conf > .checkpatch.conf
+          ../ci-tools/scripts/check_compliance.py -p ${{ github.event.pull_request.number }} \
+            -S ${{ github.sha }} \
+            -g \
+            --commits origin/${{ github.event.pull_request.base.ref }}..HEAD \
+            --repo ${{ github.event.repository.full_name }}
