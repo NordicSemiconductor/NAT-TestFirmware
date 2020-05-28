@@ -19,6 +19,7 @@
 #define TCP_PORT 3051
 #define THREAD_STACK_SIZE 8192
 #define WAIT_TIME_S 3
+#define WAIT_LOG_THRESHOLD_MS (60 * S_TO_MS_MULT)
 #define TIMEOUT_TOL_S 10
 #define DEFAULT_UDP_INITIAL_TIMEOUT 1
 #define DEFAULT_TCP_INITIAL_TIMEOUT 300
@@ -212,6 +213,7 @@ static int poll_and_read(int client_fd, int timeout_s, atomic_t *state)
 	size_t ret_len;
 	struct pollfd fds[] = { { .fd = client_fd, .events = POLLIN } };
 	s64_t start_time_ms = k_uptime_get();
+	s64_t per_log_poll_time_ms = 0;
 	s64_t total_poll_time_ms = 0;
 
 	while (1) {
@@ -225,9 +227,22 @@ static int poll_and_read(int client_fd, int timeout_s, atomic_t *state)
 
 			return -ENOTCONN;
 		} else if (err == 0) {
-			total_poll_time_ms += k_uptime_delta(&start_time_ms);
+			int delta = k_uptime_delta(&start_time_ms);
+
+			per_log_poll_time_ms += delta;
+			total_poll_time_ms += delta;
 			if (total_poll_time_ms <=
 			    (timeout_s + TIMEOUT_TOL_S) * S_TO_MS_MULT) {
+				if (per_log_poll_time_ms >=
+				    WAIT_LOG_THRESHOLD_MS) {
+					printk("Elapsed time: %d of %d seconds (%d seconds tolerance)\n",
+					       (int)(total_poll_time_ms /
+						     S_TO_MS_MULT),
+					       timeout_s + TIMEOUT_TOL_S,
+					       TIMEOUT_TOL_S);
+					per_log_poll_time_ms = 0;
+				}
+
 				continue;
 			}
 
