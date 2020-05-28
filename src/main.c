@@ -15,6 +15,32 @@
 
 K_SEM_DEFINE(lte_connected_startup, 0, 1);
 volatile enum lte_lc_nw_reg_status network_status;
+volatile enum lte_lc_system_mode network_mode;
+
+int get_network_mode(void)
+{
+	return network_mode;
+}
+
+int set_network_mode(int mode)
+{
+	if (mode != LTE_LC_SYSTEM_MODE_LTEM &&
+	    mode != LTE_LC_SYSTEM_MODE_NBIOT) {
+		return -INVALID_MODE;
+	} else if (get_test_state() != IDLE) {
+		return -TEST_RUNNING;
+	} else if (network_mode == mode) {
+		return 0;
+	}
+
+	network_mode = mode;
+
+	lte_lc_offline();
+	lte_lc_system_mode_set(mode);
+	lte_lc_normal();
+
+	return 0;
+}
 
 int get_network_status(void)
 {
@@ -76,6 +102,13 @@ void main(void)
 
 	printk("NAT-test client started\n");
 	printk("Version: %s\n", CONFIG_NAT_TEST_VERSION);
+
+	if (IS_ENABLED(CONFIG_LTE_NETWORK_MODE_NBIOT)) {
+		network_mode = LTE_LC_SYSTEM_MODE_NBIOT;
+	} else {
+		network_mode = LTE_LC_SYSTEM_MODE_LTEM;
+	}
+	network_status = LTE_LC_NW_REG_NOT_REGISTERED;
 
 	printk("Setting up LTE connection\n");
 

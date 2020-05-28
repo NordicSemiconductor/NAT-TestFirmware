@@ -9,6 +9,7 @@
 #include <net/socket.h>
 #include <shell/shell.h>
 #include <shell/shell_uart.h>
+#include <modem/lte_lc.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <zephyr.h>
@@ -170,6 +171,39 @@ static void handle_stop_test(const struct shell *shell, size_t argc,
 	shell_print(shell, "Test stopped\n");
 }
 
+static void handle_get_network_mode(const struct shell *shell, size_t argc,
+				    char **argv)
+{
+	enum lte_lc_system_mode network_mode = get_network_mode();
+
+	if (network_mode == LTE_LC_SYSTEM_MODE_NBIOT) {
+		shell_print(shell, "Network mode: NB-IoT\n");
+	} else if (network_mode == LTE_LC_SYSTEM_MODE_LTEM) {
+		shell_print(shell, "Network mode: LTE-M\n");
+	}
+}
+
+static void handle_set_network_mode(const struct shell *shell, size_t argc,
+				    char **argv)
+{
+	long mode = strtol(argv[1], NULL, 10);
+	int err = set_network_mode(mode);
+
+	if (err == -INVALID_MODE) {
+		shell_print(shell, "Invalid mode\n");
+		return;
+	} else if (err == -TEST_RUNNING) {
+		shell_print(shell, "Active test - Unable to change mode\n");
+		return;
+	}
+
+	if (mode == LTE_LC_SYSTEM_MODE_NBIOT) {
+		shell_print(shell, "Changed network mode to NB-IoT\n");
+	} else if (mode == LTE_LC_SYSTEM_MODE_LTEM) {
+		shell_print(shell, "Changed network mode to LTE-M\n");
+	}
+}
+
 static void handle_get_network_status(const struct shell *shell, size_t argc,
 				      char **argv)
 {
@@ -177,7 +211,15 @@ static void handle_get_network_status(const struct shell *shell, size_t argc,
 		    get_network_status());
 }
 
+SHELL_STATIC_SUBCMD_SET_CREATE(network_mode_accessor_cmds,
+			       SHELL_CMD(set, NULL, "Set network mode",
+					 handle_set_network_mode),
+			       SHELL_CMD(get, NULL, "Get network mode",
+					 handle_get_network_mode),
+			       SHELL_SUBCMD_SET_END);
 SHELL_STATIC_SUBCMD_SET_CREATE(network_conf_cmds,
+			       SHELL_CMD(mode, &network_mode_accessor_cmds,
+					 "Configure network mode", NULL),
 			       SHELL_CMD(status, NULL, "Get network status",
 					 handle_get_network_status),
 			       SHELL_SUBCMD_SET_END);
