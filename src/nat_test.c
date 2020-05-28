@@ -406,6 +406,7 @@ static void nat_test_run_single(enum test_type type,
 			using_binary_search = true;
 			finished =
 				get_timeout_binary_search(timeout_data, true);
+			goto reconnect;
 		} else if (err > 0 && using_binary_search) {
 			finished =
 				get_timeout_binary_search(timeout_data, false);
