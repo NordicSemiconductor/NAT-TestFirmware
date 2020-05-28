@@ -14,24 +14,11 @@
 #define THREAD_PRIORITY 5
 #define S_TO_MS_MULT 1000
 
-enum test_type {
-    TEST_UDP = 0,
-    TEST_TCP = 1,
-    TEST_UDP_AND_TCP = 2
-};
+enum test_type { TEST_UDP = 0, TEST_TCP = 1, TEST_UDP_AND_TCP = 2 };
 
-enum test_state {
-    UNINITIALIZED,
-    IDLE,
-    RUNNING,
-    ABORT
-};
+enum test_state { UNINITIALIZED, IDLE, RUNNING, ABORT };
 
-enum set_network_mode_error {
-    SUCCESS = 0,
-    INVALID_MODE = 1,
-    TEST_RUNNING = 2
-};
+enum set_network_mode_error { SUCCESS = 0, INVALID_MODE = 1, TEST_RUNNING = 2 };
 
 extern volatile int udp_initial_timeout;
 extern volatile int tcp_initial_timeout;

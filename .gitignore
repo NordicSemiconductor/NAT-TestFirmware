@@ -20,7 +20,6 @@ tags
 .xxproject
 .envrc
 .vscode
-.clang-format
 
 doc/_build
 doc/nrf/_doxygen/
