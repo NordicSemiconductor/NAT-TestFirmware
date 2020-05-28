@@ -149,6 +149,22 @@ static void handle_start_test(const struct shell *shell, size_t argc,
 		return;
 	}
 
+	err = lte_lc_psm_req(false);
+	if (err < 0) {
+		shell_print(
+			shell,
+			"Failed to disable Power Saving mode.\nRequest to start test denied.\n");
+		return;
+	}
+
+	err = lte_lc_edrx_req(false);
+	if (err < 0) {
+		shell_print(
+			shell,
+			"Failed to disable use of eDRX.\nRequest to start test denied.\n");
+		return;
+	}
+
 	err = nat_test_start(type);
 	if (err < 0) {
 		shell_print(shell, "Another test is still active\n");
