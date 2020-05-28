@@ -17,8 +17,6 @@
 
 #define UDP_PORT 3050
 #define TCP_PORT 3051
-#define THREAD_STACK_SIZE 8192
-#define WAIT_TIME_S 3
 #define WAIT_LOG_THRESHOLD_MS (60 * S_TO_MS_MULT)
 #define TIMEOUT_TOL_S 10
 #define DEFAULT_UDP_INITIAL_TIMEOUT 1
@@ -284,11 +282,14 @@ static int setup_connection(int *client_fd, enum test_type type, int port,
 		return -1;
 	}
 
+	k_sem_take(&getaddrinfo_sem, K_FOREVER);
 	err = getaddrinfo(SERVER_HOSTNAME, NULL, &hints, &res);
 	if (err) {
+		k_sem_give(&getaddrinfo_sem);
 		printk("getaddrinfo() failed, err %d\n", errno);
 		return -1;
 	}
+	k_sem_give(&getaddrinfo_sem);
 
 	((struct sockaddr_in *)res->ai_addr)->sin_port = htons(port);
 
