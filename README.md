@@ -40,6 +40,9 @@ The NAT-test client can be configured through UART shell (115200 baudrate) with 
         - get
         - set <value>
   - network
+    - mode
+      - get
+      - set
     - state
       - get
 

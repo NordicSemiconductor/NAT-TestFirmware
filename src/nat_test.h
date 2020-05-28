@@ -18,6 +18,8 @@ enum test_type { TEST_UDP = 0, TEST_TCP = 1, TEST_UDP_AND_TCP = 2 };
 
 enum test_state { UNINITIALIZED, IDLE, RUNNING, ABORT };
 
+enum set_network_mode_error { SUCCESS = 0, INVALID_MODE = 1, TEST_RUNNING = 2 };
+
 extern volatile int udp_initial_timeout;
 extern volatile int tcp_initial_timeout;
 extern volatile float udp_timeout_multiplier;
@@ -27,6 +29,18 @@ extern volatile float tcp_timeout_multiplier;
  * @brief Function to get current test state
  */
 int get_test_state(void);
+
+/**
+ * @brief Function to get network mode
+ */
+int get_network_mode(void);
+
+/**
+ * @brief Function to set network mode
+ *
+ * @param mode New network mode. LTE_LC_SYSTEM_MODE_LTEM = 1 or LTE_LC_SYSTEM_MODE_NB_IOT = 2
+ */
+int set_network_mode(int mode);
 
 /**
  * @brief Function to get network status
