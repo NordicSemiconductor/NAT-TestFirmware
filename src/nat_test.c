@@ -170,26 +170,14 @@ exit:
 	return ret;
 }
 
-static int send_data(int client_fd, int timeout_s)
+static int send_data(int client_fd, int timeout_s,
+		     struct modem_param_info const *const modem_params)
 {
 	int err;
 	char send_buf[BUF_SIZE] = { 0 };
 	int send_len;
-	struct modem_param_info modem_params = { 0 };
 
-	err = modem_info_params_init(&modem_params);
-	if (err) {
-		printk("Modem info params could not be initialised: %d\n", err);
-		return -1;
-	}
-
-	err = modem_info_params_get(&modem_params);
-	if (err < 0) {
-		printk("Unable to obtain modem parameters: %d\n", err);
-		return -ENOTCONN;
-	}
-
-	send_len = create_send_buffer(&modem_params, send_buf, timeout_s);
+	send_len = create_send_buffer(modem_params, send_buf, timeout_s);
 	if (send_len < 0) {
 		return -1;
 	}
@@ -369,6 +357,7 @@ static void nat_test_run_single(enum test_type type,
 	bool using_binary_search = false;
 	int port = 0;
 	enum lte_lc_nw_reg_status network_status = get_network_status();
+	struct modem_param_info modem_params = { 0 };
 
 	if ((network_status != LTE_LC_NW_REG_REGISTERED_HOME) &&
 	    (network_status != LTE_LC_NW_REG_REGISTERED_ROAMING)) {
@@ -383,12 +372,25 @@ static void nat_test_run_single(enum test_type type,
 		return;
 	}
 
+	err = modem_info_params_init(&modem_params);
+	if (err) {
+		printk("Modem info params could not be initialised: %d\n", err);
+		return;
+	}
+
+	err = modem_info_params_get(&modem_params);
+	if (err < 0) {
+		printk("Unable to obtain modem parameters: %d\n", err);
+		return;
+	}
+
 	while (!finished) {
 		if (atomic_get(state) == ABORT) {
 			goto abort;
 		}
 
-		err = send_data(client_fd, timeout_data->timeout);
+		err = send_data(client_fd, timeout_data->timeout,
+				&modem_params);
 		if (err < 0) {
 			if (err == -ENOTCONN) {
 				goto reconnect;
