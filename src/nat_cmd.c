@@ -90,6 +90,7 @@ static void handle_set_multiplier(const struct shell *shell, size_t argc,
 				  char **argv)
 {
 	float value;
+	char msg[40];
 
 	if (argc <= 1) {
 		shell_print(shell, "Multiplier value was not provided\n");
@@ -103,12 +104,14 @@ static void handle_set_multiplier(const struct shell *shell, size_t argc,
 
 	if (!strcmp(argv[-2], "udp")) {
 		udp_timeout_multiplier = value;
-		shell_print(shell, "UDP timeout multiplier set to: %s",
-			    udp_timeout_multiplier);
+		snprintf(msg, 40, "UDP timeout multiplier set to: %.1f\n",
+			 udp_timeout_multiplier);
+		shell_print(shell, "%s", msg);
 	} else if (!strcmp(argv[-2], "tcp")) {
 		tcp_timeout_multiplier = value;
-		shell_print(shell, "TCP timeout multiplier set to: %s",
-			    tcp_timeout_multiplier);
+		snprintf(msg, 40, "TCP timeout multiplier set to: %.1f\n",
+			 tcp_timeout_multiplier);
+		shell_print(shell, "%s", msg);
 	}
 }
 
