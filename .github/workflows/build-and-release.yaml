@@ -24,8 +24,8 @@ jobs:
 
       - name: Build
         run: |
-          docker run --rm -v ${PWD}:/workdir/ncs/firmware nat-testfirmware-docker /bin/bash -c 'cd ncs/firmware; west build -p always -b nrf9160_pca10090ns'
-          cp -v build/zephyr/merged.hex ${GITHUB_WORKSPACE}/nat-test-nrf9160_pca10090ns.hex
+          docker run --rm -v ${PWD}:/workdir/ncs/firmware nat-testfirmware-docker /bin/bash -c 'cd ncs/firmware; west build -p always -b nrf9160dk_nrf9160ns'
+          cp -v build/zephyr/merged.hex ${GITHUB_WORKSPACE}/nat-test-nrf9160dk_nrf9160ns.hex
 
       - name: Semantic release
         continue-on-error: true
