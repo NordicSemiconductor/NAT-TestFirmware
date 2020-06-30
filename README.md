@@ -17,7 +17,7 @@ Please help us learn more about NAT timeouts in cellular networks:
 1. Find the latest firmware build in the [releases](https://github.com/NordicSemiconductor/NAT-TestFirmware/releases) and flash it onto your nRF9160 Development Kit.
 1. Insert the SIM card of your choice and power on the development kit. The test starts automatically. **Do not change the location of the development kit during testing, and avoid switching mobile cells.**
 1. Optionally, you can connect the development kit via USB and observe the test status in a terminal.
-1. Wait until the test finish (indicated by the 4 LEDs blinking in a rotating pattern). If the TCP test is still running after 24 hours, you can abort it. We generally assume that more than 24 hours means sufficient power savings are provided from the network for the majority of use case scenarios.
+1. Wait until the test finishes (This is indicated by the 4 LEDs, blinking in a rotating pattern). If the TCP test continues to run for more than 24 hours, you can abort it. It is generally assumed that a test run duration exceeding 24 hours indicates a network providing sufficient power savings for majority of the use case scenarios.
 1. Register an account on <https://cellprobe.thingy.rocks/> and login to see your test results (These results are updated every hour).
 1. If your SIM does not show up after login, it could mean that the ICCID is unknown. In this case, open an issue in the [TestServer repository](https://github.com/NordicSemiconductor/NAT-TestServer/issues/new).
 1. Optionally, repeat the steps from Step 2 for every SIM you would like to test.
