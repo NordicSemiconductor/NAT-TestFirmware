@@ -12,7 +12,8 @@ This application is built with [sdk-nrf](https://github.com/nrfconnect/sdk-nrf).
 
 ## Getting started
 
-Please help us learn more about NAT timeouts in cellular networks:
+Support this project by giving more insight into the NAT timeouts in cellular networks.
+The following steps describe the testing process:
 
 1. Find the latest firmware build in the [releases](https://github.com/NordicSemiconductor/NAT-TestFirmware/releases) and flash it onto your nRF9160 Development Kit.
 1. Insert the SIM card of your choice and power on the development kit. The test starts automatically. **Do not change the location of the development kit during testing, and avoid switching mobile cells.**
