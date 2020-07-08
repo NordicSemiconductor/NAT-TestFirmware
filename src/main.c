@@ -18,6 +18,8 @@ K_SEM_DEFINE(lte_connected_startup, 0, 1);
 volatile enum lte_lc_nw_reg_status network_status;
 volatile enum lte_lc_system_mode network_mode;
 
+struct k_sem getaddrinfo_sem;
+
 int get_network_mode(void)
 {
 	return network_mode;
@@ -176,6 +178,8 @@ void main(void)
 
 	printk("LTE connected\n");
 
+	k_sem_init(&getaddrinfo_sem, 0, 1);
+
 	dk_leds_init();
 
 	cJSON_Init();
@@ -187,6 +191,8 @@ void main(void)
 	}
 
 	nat_test_init();
+	nat_cmd_init();
+	k_sem_give(&getaddrinfo_sem);
 
 	err = nat_test_start(TEST_UDP_AND_TCP);
 	if (err) {

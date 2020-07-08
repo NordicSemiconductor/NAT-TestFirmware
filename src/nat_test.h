@@ -7,11 +7,11 @@
 #ifndef NAT_TEST_H_
 #define NAT_TEST_H_
 
-#include <shell/shell.h>
-
 #define SERVER_HOSTNAME "nat-test.thingy.rocks"
 #define BUF_SIZE 512
 #define THREAD_PRIORITY 5
+#define THREAD_STACK_SIZE 8192
+#define WAIT_TIME_S 3
 #define S_TO_MS_MULT 1000
 
 enum test_type { TEST_UDP = 0, TEST_TCP = 1, TEST_UDP_AND_TCP = 2 };
@@ -24,6 +24,8 @@ extern volatile int udp_initial_timeout;
 extern volatile int tcp_initial_timeout;
 extern volatile float udp_timeout_multiplier;
 extern volatile float tcp_timeout_multiplier;
+
+extern struct k_sem getaddrinfo_sem;
 
 /**
  * @brief Function to get current test state
@@ -63,5 +65,10 @@ int nat_test_start(enum test_type type);
  * @brief Function for initializing the NAT-test client.
  */
 void nat_test_init(void);
+
+/**
+ * @brief Function for initializing the NAT-cmd module.
+ */
+void nat_cmd_init(void);
 
 #endif /* NAT_TEST_H_ */
